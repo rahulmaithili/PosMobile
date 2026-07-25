@@ -5115,6 +5115,13 @@
       const [profileImg, setProfileImg] = useState('');
       const [busy, setBusy] = useState('');
 
+      const currencyPresets = [
+        { symbol: '₹', code: 'INR', position: 'before', label: 'INR (₹)' },
+        { symbol: '€', code: 'EUR', position: 'before', label: 'EUR (€)' },
+        { symbol: '$', code: 'USD', position: 'before', label: 'USD ($)' },
+        { symbol: '£', code: 'GBP', position: 'before', label: 'GBP (£)' }
+      ];
+
       useEffect(() => {
         gsRun('getShopSettings').then(r => { if (r.success) { setShop(r.data || {}); setBase(r.data || {}); } });
         gsRun('getUserSettings', userId).then(r => { if (r.success && r.settings) setProfileImg(r.settings.profileImage || ''); });
@@ -5235,6 +5242,22 @@
               {shop && section === 'localization' && (
                 <SettingsCard s={cur} isDirty={dirty(cur.keys)} canEditShop={canEditShop} dis={dis} onSave={() => saveSection(cur.keys)}>
                   <div className="form-grid">
+                    <div className="form-group" style={{gridColumn:'1 / -1'}}>
+                      <label><i className="fas fa-coins"></i> Select Currency</label>
+                      <select className="swal2-select" style={{width:'100%', margin:0, background:'rgba(255,255,255,0.05)', color:'#fff', border:'1px solid rgba(255,255,255,0.2)', borderRadius:'6px', padding:'10px'}}
+                              value={f.currency_code || ''} disabled={dis}
+                              onChange={(e) => {
+                                const preset = currencyPresets.find(p => p.code === e.target.value);
+                                if (preset) {
+                                  set('currency', preset.symbol);
+                                  set('currency_code', preset.code);
+                                  set('currency_position', preset.position);
+                                }
+                              }}>
+                        <option value="" style={{background:'#001529'}}>-- Custom / Manual --</option>
+                        {currencyPresets.map(p => <option key={p.code} value={p.code} style={{background:'#001529'}}>{p.label}</option>)}
+                      </select>
+                    </div>
                     <div className="form-group"><label><i className="fas fa-coins"></i> Currency Symbol</label><input type="text" value={f.currency || ''} onChange={(e) => set('currency', e.target.value)} disabled={dis} placeholder="€" /></div>
                     <div className="form-group"><label><i className="fas fa-hashtag"></i> Currency Code</label><input type="text" value={f.currency_code || ''} onChange={(e) => set('currency_code', e.target.value)} disabled={dis} placeholder="EUR" /></div>
                     <div className="form-group"><label><i className="fas fa-arrows-left-right"></i> Symbol Position</label><SearchableDropdown options={posOpts} value={f.currency_position || 'before'} onChange={(v) => set('currency_position', v)} placeholder="Position" /></div>
