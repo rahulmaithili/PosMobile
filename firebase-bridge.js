@@ -295,6 +295,8 @@
     db = wrapFirestore(rawDb);
     try {
       storage = firebase.storage();
+      storage.setMaxUploadRetryTime(3000);
+      storage.setMaxOperationRetryTime(3000);
     } catch (e) {
       console.warn("Firebase Storage failed to initialize:", e);
       storage = null;
