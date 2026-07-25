@@ -75,6 +75,16 @@
   let db, storage;
   let isInitialized = false;
 
+  const DEFAULT_FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCfy0CuI_zusyzMxGsWuErE1H1G30Iw5Ec",
+    authDomain: "mobilepos-31955.firebaseapp.com",
+    databaseURL: "https://mobilepos-31955-default-rtdb.firebaseio.com",
+    projectId: "mobilepos-31955",
+    storageBucket: "mobilepos-31955.firebasestorage.app",
+    messagingSenderId: "617327800531",
+    appId: "1:617327800531:web:6f061b3aeb57ac19a1a426"
+  };
+
   function loadFirebaseConfig() {
     try {
       const configStr = localStorage.getItem('firebaseConfig');
@@ -84,7 +94,7 @@
     } catch(e) {
       console.error("Failed to parse firebaseConfig from localStorage:", e);
     }
-    return null;
+    return DEFAULT_FIREBASE_CONFIG;
   }
 
   function initializeFirebase(config) {
@@ -96,17 +106,27 @@
     isInitialized = true;
   }
 
-  // Check and show setup wizard if not configured
-  window.addEventListener('DOMContentLoaded', () => {
+  // Check and show setup wizard if not configured or not seeded
+  window.addEventListener('DOMContentLoaded', async () => {
     const config = loadFirebaseConfig();
-    if (config) {
-      initializeFirebase(config);
+    if (config && config.apiKey && !config.apiKey.startsWith("AIzaSy...")) {
+      try {
+        initializeFirebase(config);
+        // Check if database is seeded by querying system counters document
+        const doc = await db.collection('system').doc('counters').get();
+        if (!doc.exists) {
+          showSetupWizard(true); // ready to seed mode
+        }
+      } catch (e) {
+        console.error("Firebase init failed, showing full setup wizard:", e);
+        showSetupWizard(false); // full setup mode
+      }
     } else {
-      showSetupWizard();
+      showSetupWizard(false);
     }
   });
 
-  function showSetupWizard() {
+  function showSetupWizard(readyToSeed = false) {
     const overlay = document.createElement('div');
     overlay.id = 'firebase-setup-overlay';
     overlay.innerHTML = `
@@ -168,9 +188,13 @@
       </style>
       <div class="setup-card">
         <div class="setup-title">Firebase Setup Wizard</div>
-        <div class="setup-subtitle">Connect your Mobile Shop POS system to Firebase.<br/>Paste your Firebase Web App configuration below.</div>
+        <div class="setup-subtitle" id="setup-subtitle-text">
+          ${readyToSeed 
+            ? 'Firebase is successfully connected to your project! <br/>Click below to initialize and seed your Firestore database.' 
+            : 'Connect your Mobile Shop POS system to Firebase.<br/>Paste your Firebase Web App configuration below.'}
+        </div>
         
-        <form id="firebase-config-form">
+        <form id="firebase-config-form" style="${readyToSeed ? 'display:none;' : ''}">
           <div class="form-group">
             <label>API Key</label>
             <input type="text" id="apiKey" required placeholder="AIzaSy...">
@@ -197,7 +221,7 @@
           </div>
           <button type="submit" class="setup-btn" id="submit-config-btn">Connect & Save</button>
         </form>
-        <button class="setup-btn" id="seed-db-btn" style="display:none; background:#2e7d32;">Initialize & Seed Database</button>
+        <button class="setup-btn" id="seed-db-btn" style="${readyToSeed ? 'display:block;' : 'display:none;'} background:#2e7d32;">Initialize & Seed Database</button>
         <div class="setup-status" id="setup-status-box"></div>
         <a href="https://console.firebase.google.com/" target="_blank" class="help-link">Open Firebase Console</a>
       </div>
@@ -224,22 +248,18 @@
       };
 
       try {
-        // Try initializing
         if (firebase.apps.length > 0) {
           await firebase.app().delete();
         }
         firebase.initializeApp(config);
         const testDb = firebase.firestore();
         
-        // Write test document to confirm connection
         statusBox.className = 'setup-status status-success';
         statusBox.textContent = 'Firebase connected! Ready to seed database.';
         statusBox.style.display = 'block';
         
-        // Save config
         localStorage.setItem('firebaseConfig', JSON.stringify(config));
         
-        // Switch buttons
         form.style.display = 'none';
         seedBtn.style.display = 'block';
         db = testDb;
