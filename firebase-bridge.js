@@ -1117,9 +1117,19 @@
       if (!uid) return err('Access denied');
 
       const id = await getNextId('supplier_purchases');
+      let paymentId = null;
+      const paid = round2(d.amount_paid) || 0;
+      if (paid > 0) {
+        paymentId = await getNextId('supplier_payments');
+      }
+
+      const movementIds = [];
+      for (let i = 0; i < (d.items || []).length; i++) {
+        movementIds.push(await getNextId('inventory_movements'));
+      }
+
       const nowIso = new Date().toISOString();
       const total = round2(d.total_amount) || 0;
-      const paid = round2(d.amount_paid) || 0;
       const due = round2(total - paid);
       
       const record = {
@@ -1141,13 +1151,20 @@
       };
 
       return db.runTransaction(async (transaction) => {
-        // 1. Save the purchase record
-        transaction.set(db.collection('supplier_purchases').doc(String(id)), record);
-
-        // 2. Loop through each item to update product stocks & insert movements
+        // 1. Fetch all product documents first (ALL READS MUST HAPPEN FIRST)
+        const productSnapshots = [];
         for (const item of d.items || []) {
           const productRef = db.collection('products').doc(String(item.product_id));
           const prodDoc = await transaction.get(productRef);
+          productSnapshots.push({ item, prodDoc, productRef });
+        }
+
+        // 2. Perform all writes
+        // A. Save the purchase record
+        transaction.set(db.collection('supplier_purchases').doc(String(id)), record);
+
+        // B. Update product stock levels & save inventory movement logs
+        productSnapshots.forEach(({ item, prodDoc, productRef }, idx) => {
           if (prodDoc.exists && !prodDoc.data().deleted) {
             const currentStock = Number(prodDoc.data().stock_qty) || 0;
             const newStock = currentStock + Number(item.qty);
@@ -1160,7 +1177,7 @@
             });
 
             // Create inventory movement
-            const movementId = await getNextId('inventory_movements');
+            const movementId = movementIds[idx];
             const movementRef = db.collection('inventory_movements').doc(String(movementId));
             transaction.set(movementRef, {
               id: movementId,
@@ -1175,11 +1192,10 @@
               updated: nowIso
             });
           }
-        }
+        });
 
-        // 3. Save initial payment if any
-        if (paid > 0) {
-          const paymentId = await getNextId('supplier_payments');
+        // C. Save initial payment if any
+        if (paid > 0 && paymentId) {
           transaction.set(db.collection('supplier_payments').doc(String(paymentId)), {
             id: paymentId,
             purchase_id: id,
