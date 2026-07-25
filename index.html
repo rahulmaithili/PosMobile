@@ -3709,6 +3709,43 @@
         </div>
     }
 
+    function RecallHeldBillsModal({ heldCarts, onRecall, onDelete, onClose, money }) {
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'600px'}}>
+            <div className="modal-header"><h3><i className="fas fa-folder-open"></i> Held Bills & Drafts</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
+            <div className="modal-body">
+              <div className="about-table-wrapper" style={{maxHeight:'320px', overflowY:'auto'}}>
+                <table className="about-roles-table">
+                  <thead><tr><th>Hold Reference</th><th>Time</th><th>Items Summary</th><th>Total</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {heldCarts.map(h => {
+                      const totalCart = h.cart.reduce((sum, item) => sum + (item.unit_price * item.qty), 0);
+                      const summary = h.cart.map(c => `${c.name} (x${c.qty})`).join(', ');
+                      return (
+                        <tr key={h.id}>
+                          <td style={{fontWeight:'700', color:'var(--navy-primary)'}}>{esc(h.name)}</td>
+                          <td style={{fontSize:'12px'}}>{new Date(h.id).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
+                          <td style={{fontSize:'12px', maxWidth:'220px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}} title={summary}>{esc(summary)}</td>
+                          <td>{money(totalCart)}</td>
+                          <td>
+                            <div style={{display:'flex', gap:'6px'}}>
+                              <button className="btn btn-primary btn-sm" style={{padding:'2px 8px', fontSize:'11px'}} onClick={() => onRecall(h)}><i className="fas fa-rotate-left"></i> Resume</button>
+                              <button className="btn btn-secondary btn-sm" style={{padding:'2px 8px', fontSize:'11px', background:'#b91c1c', border:'none', color:'#fff'}} onClick={() => onDelete(h.id)}><i className="fas fa-trash"></i> Discard</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function CreateSupplierPurchaseModal({ supplierOpts, onClose, onSave }) {
       const [supplierId, setSupplierId] = useState('');
       const [invoiceNo, setInvoiceNo] = useState('');
@@ -4632,6 +4669,18 @@
       const [prodCat, setProdCat] = useState('');
       const [inStockOnly, setInStockOnly] = useState(false);
 
+      const [heldCarts, setHeldCarts] = useState(() => {
+        try {
+          const saved = localStorage.getItem('pos_held_carts');
+          return saved ? JSON.parse(saved) : [];
+        } catch (e) { return []; }
+      });
+      const [showRecallModal, setShowRecallModal] = useState(false);
+
+      useEffect(() => {
+        localStorage.setItem('pos_held_carts', JSON.stringify(heldCarts));
+      }, [heldCarts]);
+
       const currencyPresets = [
         { symbol: '₹', code: 'INR', position: 'before', label: 'INR (₹)' },
         { symbol: '€', code: 'EUR', position: 'before', label: 'EUR (€)' },
@@ -4731,6 +4780,88 @@
         });
       };
 
+      const holdCurrentBill = () => {
+        if (!cart.length) return;
+        const defaultName = sel ? sel.name : ('Draft ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
+        Swal.fire({
+          title: 'Hold Current Bill',
+          text: 'Enter a reference name to identify this draft:',
+          input: 'text',
+          inputValue: defaultName,
+          showCancelButton: true,
+          confirmButtonText: 'Hold Bill',
+          confirmButtonColor: 'var(--navy-accent)',
+          inputValidator: (value) => {
+            if (!value.trim()) return 'Please enter a name!';
+          }
+        }).then(res => {
+          if (res.isConfirmed) {
+            const refName = res.value.trim();
+            const newHeld = {
+              id: Date.now(),
+              name: refName,
+              cart,
+              customerId,
+              discount,
+              redeemPts,
+              useCredit,
+              pay,
+              cartCurrencyCode,
+              created: new Date().toISOString()
+            };
+            setHeldCarts(prev => [newHeld, ...prev]);
+            setCart([]); setCustomerId(''); setDiscount(''); setAmountPaid(''); setRedeemPts(''); setUseCredit('');
+            Swal.fire({ icon:'success', title:'Bill Placed on Hold', text:`"${refName}" saved`, timer:1100, showConfirmButton:false });
+          }
+        });
+      };
+
+      const recallBill = (held) => {
+        const load = () => {
+          setCart(held.cart);
+          setCustomerId(held.customerId || '');
+          setDiscount(held.discount || '');
+          setRedeemPts(held.redeemPts || '');
+          setUseCredit(held.useCredit || '');
+          setPay(held.pay || 'cash');
+          if (held.cartCurrencyCode) setCartCurrencyCode(held.cartCurrencyCode);
+          
+          setHeldCarts(prev => prev.filter(x => x.id !== held.id));
+          setShowRecallModal(false);
+          Swal.fire({ icon:'success', title:'Bill Resumed', timer:900, showConfirmButton:false });
+        };
+        if (cart.length > 0) {
+          Swal.fire({
+            title: 'Overwrite current cart?',
+            text: 'Your cart is not empty. Resuming this draft will overwrite current cart items.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, Overwrite',
+            confirmButtonColor: 'var(--navy-accent)'
+          }).then(res => {
+            if (res.isConfirmed) load();
+          });
+        } else {
+          load();
+        }
+      };
+
+      const discardHeld = (id) => {
+        Swal.fire({
+          title: 'Discard draft?',
+          text: 'This draft will be permanently deleted.',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#b91c1c',
+          confirmButtonText: 'Delete'
+        }).then(res => {
+          if (res.isConfirmed) {
+            setHeldCarts(prev => prev.filter(x => x.id !== id));
+            Swal.fire({ icon:'success', title:'Draft Discarded', timer:900, showConfirmButton:false });
+          }
+        });
+      };
+
       const custOpts = customers.map(c => ({ value:c.id, label:`${c.name} (${c.phone})` }));
 
       // product picker filter (search + category)
@@ -4751,10 +4882,17 @@
             <h2 style={{display:'flex', alignItems:'center', gap:'8px', color:'var(--navy-primary)', margin:0}}><i className="fas fa-cash-register"></i> Point of Sale</h2>
           </div>
 
-          <div className="pos-subtabs">
-            <button className={'pos-subtab' + (tab === 'register' ? ' active' : '')} onClick={() => setTab('register')}><i className="fas fa-cash-register"></i> Register</button>
-            <button className={'pos-subtab' + (tab === 'history' ? ' active' : '')} onClick={() => setTab('history')}><i className="fas fa-clock-rotate-left"></i> Sales History</button>
-            <button className={'pos-subtab' + (tab === 'returns' ? ' active' : '')} onClick={() => setTab('returns')}><i className="fas fa-rotate-left"></i> Returns &amp; Refunds</button>
+          <div className="pos-subtabs" style={{display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px', marginBottom:'14px'}}>
+            <div style={{display:'flex', gap:'5px'}}>
+              <button className={'pos-subtab' + (tab === 'register' ? ' active' : '')} onClick={() => setTab('register')}><i className="fas fa-cash-register"></i> Register</button>
+              <button className={'pos-subtab' + (tab === 'history' ? ' active' : '')} onClick={() => setTab('history')}><i className="fas fa-clock-rotate-left"></i> Sales History</button>
+              <button className={'pos-subtab' + (tab === 'returns' ? ' active' : '')} onClick={() => setTab('returns')}><i className="fas fa-rotate-left"></i> Returns &amp; Refunds</button>
+            </div>
+            {heldCarts.length > 0 && tab === 'register' && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowRecallModal(true)} style={{padding:'5px 12px', background:'var(--navy-accent)', border:'none', color:'#fff', display:'flex', alignItems:'center', gap:'6px', borderRadius:'6px'}}>
+                <i className="fas fa-folder-open"></i> Held Drafts <span style={{background:'#fff', color:'var(--navy-primary)', padding:'1px 6px', borderRadius:'10px', fontSize:'11px', fontWeight:'700'}}>{heldCarts.length}</span>
+              </button>
+            )}
           </div>
 
           {tab === 'history' ? <SalesHistory userId={userId} role={role} perms={perms} /> : tab === 'returns' ? <ReturnsLog userId={userId} role={role} perms={perms} /> : !canSell ? (
@@ -4879,12 +5017,29 @@
                 </div>
                 <div className="pos-total-row"><span>Change</span><span>{money(change)}</span></div>
 
-                <button className="btn btn-primary" style={{width:'100%', marginTop:'14px'}}
-                        disabled={!cart.length || !canSell} onClick={checkout}>
-                  <i className="fas fa-check"></i> Checkout
-                </button>
+                <div style={{display:'flex', gap:'10px', marginTop:'14px'}}>
+                  {cart.length > 0 && (
+                    <button type="button" className="btn btn-secondary" style={{flex: 1, display:'flex', alignItems:'center', justifyContent:'center', gap:'6px'}} onClick={holdCurrentBill}>
+                      <i className="fas fa-pause"></i> Hold
+                    </button>
+                  )}
+                  <button className="btn btn-primary" style={{flex: cart.length > 0 ? 2 : 1}}
+                          disabled={!cart.length || !canSell} onClick={checkout}>
+                    <i className="fas fa-check"></i> Checkout
+                  </button>
+                </div>
               </div>
             </div>
+          )}
+
+          {showRecallModal && (
+            <RecallHeldBillsModal
+              heldCarts={heldCarts}
+              onRecall={recallBill}
+              onDelete={discardHeld}
+              onClose={() => setShowRecallModal(false)}
+              money={money}
+            />
           )}
         </div>
       );
