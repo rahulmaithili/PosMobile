@@ -107,7 +107,7 @@
     if (!db || isListeningToSync) return;
     isListeningToSync = true;
     
-    const rawDb = db._rawDb || db;
+    const rawDb = db;
     // Check first if document exists, if not create it
     rawDb.collection('system').doc('sync').get().then(doc => {
       if (!doc.exists) {
@@ -138,8 +138,7 @@
     if (collectionName === 'system' || collectionName === 'sessions' || collectionName === 'activity_logs') return;
     try {
       if (db) {
-        const rawDb = db._rawDb || db;
-        await rawDb.collection('system').doc('sync').set({
+        await db.collection('system').doc('sync').set({
           [collectionName]: Date.now()
         }, { merge: true });
       }
@@ -148,151 +147,140 @@
     }
   }
 
-  function wrapFirestore(rawDb) {
-    const handler = {
-      get(target, prop) {
-        if (prop === '_rawDb') return target;
-        if (prop === 'collection') {
-          return function(collectionName) {
-            const rawCol = target.collection(collectionName);
-            return wrapCollection(rawCol, collectionName);
-          };
-        }
-        if (prop === 'batch') {
-          return function() {
-            const rawBatch = target.batch();
-            return wrapBatch(rawBatch);
-          };
-        }
-        if (prop === 'runTransaction') {
-          return function(updateFunction) {
-            const touched = new Set();
-            return target.runTransaction(async (rawTx) => {
-              const proxiedTx = new Proxy(rawTx, {
-                get(t, p) {
-                  if (p === 'set' || p === 'update' || p === 'delete') {
-                    return function(docRef, ...args) {
-                      const path = docRef.path || '';
-                      const parts = path.split('/');
-                      if (parts.length > 0) {
-                        touched.add(parts[0]);
-                      }
-                      const rawRef = docRef._rawDoc || docRef;
-                      t[p](rawRef, ...args);
-                      return proxiedTx;
-                    };
-                  }
-                  if (p === 'get') {
-                    return function(docRef) {
-                      const rawRef = docRef._rawDoc || docRef;
-                      return t.get(rawRef);
-                    };
-                  }
-                  const v = t[p];
-                  return typeof v === 'function' ? v.bind(t) : v;
-                }
-              });
-              return await updateFunction(proxiedTx);
-            }).then((res) => {
-              touched.forEach(col => triggerSync(col));
-              return res;
-            });
-          };
-        }
-        const val = target[prop];
-        return typeof val === 'function' ? val.bind(target) : val;
-      }
-    };
-    return new Proxy(rawDb, handler);
-  }
+  let prototypesOverridden = false;
+  function overrideFirestorePrototypes() {
+    if (prototypesOverridden) return;
+    prototypesOverridden = true;
 
-  function wrapCollection(rawCol, collectionName) {
-    return new Proxy(rawCol, {
-      get(target, prop) {
-        if (prop === 'doc') {
-          return function(docId) {
-            const rawDoc = target.doc(docId);
-            return wrapDoc(rawDoc, collectionName);
-          };
+    try {
+      // 1. DocumentReference prototype
+      const origSet = firebase.firestore.DocumentReference.prototype.set;
+      firebase.firestore.DocumentReference.prototype.set = async function(...args) {
+        const res = await origSet.apply(this, args);
+        const path = this.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) {
+          triggerSync(parts[0]);
         }
-        if (prop === 'add') {
-          return async function(data) {
-            const res = await target.add(data);
-            triggerSync(collectionName);
-            return res;
-          };
-        }
-        const val = target[prop];
-        return typeof val === 'function' ? val.bind(target) : val;
-      }
-    });
-  }
+        return res;
+      };
 
-  function wrapDoc(rawDoc, collectionName) {
-    return new Proxy(rawDoc, {
-      get(target, prop) {
-        if (prop === '_rawDoc') return target;
-        if (prop === 'set') {
-          return async function(data, options) {
-            const res = await target.set(data, options);
-            triggerSync(collectionName);
-            return res;
-          };
+      const origUpdate = firebase.firestore.DocumentReference.prototype.update;
+      firebase.firestore.DocumentReference.prototype.update = async function(...args) {
+        const res = await origUpdate.apply(this, args);
+        const path = this.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) {
+          triggerSync(parts[0]);
         }
-        if (prop === 'update') {
-          return async function(data) {
-            const res = await target.update(data);
-            triggerSync(collectionName);
-            return res;
-          };
-        }
-        if (prop === 'delete') {
-          return async function() {
-            const res = await target.delete();
-            triggerSync(collectionName);
-            return res;
-          };
-        }
-        const val = target[prop];
-        return typeof val === 'function' ? val.bind(target) : val;
-      }
-    });
-  }
+        return res;
+      };
 
-  function wrapBatch(rawBatch) {
-    const touchedCollections = new Set();
-    return new Proxy(rawBatch, {
-      get(target, prop) {
-        if (prop === 'set' || prop === 'update' || prop === 'delete') {
-          return function(docRef, ...args) {
-            const path = docRef.path || '';
-            const parts = path.split('/');
-            if (parts.length > 0) {
-              touchedCollections.add(parts[0]);
-            }
-            const rawRef = docRef._rawDoc || docRef;
-            return target[prop](rawRef, ...args);
-          };
+      const origDelete = firebase.firestore.DocumentReference.prototype.delete;
+      firebase.firestore.DocumentReference.prototype.delete = async function(...args) {
+        const res = await origDelete.apply(this, args);
+        const path = this.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) {
+          triggerSync(parts[0]);
         }
-        if (prop === 'commit') {
-          return async function() {
-            const res = await target.commit();
-            touchedCollections.forEach(col => triggerSync(col));
-            return res;
-          };
+        return res;
+      };
+
+      // 2. CollectionReference prototype
+      const origAdd = firebase.firestore.CollectionReference.prototype.add;
+      firebase.firestore.CollectionReference.prototype.add = async function(...args) {
+        const res = await origAdd.apply(this, args);
+        const path = this.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) {
+          triggerSync(parts[0]);
         }
-        const val = target[prop];
-        return typeof val === 'function' ? val.bind(target) : val;
-      }
-    });
+        return res;
+      };
+
+      // 3. WriteBatch prototype
+      const origBatchCommit = firebase.firestore.WriteBatch.prototype.commit;
+      const origBatchSet = firebase.firestore.WriteBatch.prototype.set;
+      const origBatchUpdate = firebase.firestore.WriteBatch.prototype.update;
+      const origBatchDelete = firebase.firestore.WriteBatch.prototype.delete;
+
+      firebase.firestore.WriteBatch.prototype.set = function(docRef, ...args) {
+        if (!this._touchedCols) this._touchedCols = new Set();
+        const path = docRef.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) this._touchedCols.add(parts[0]);
+        return origBatchSet.call(this, docRef, ...args);
+      };
+
+      firebase.firestore.WriteBatch.prototype.update = function(docRef, ...args) {
+        if (!this._touchedCols) this._touchedCols = new Set();
+        const path = docRef.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) this._touchedCols.add(parts[0]);
+        return origBatchUpdate.call(this, docRef, ...args);
+      };
+
+      firebase.firestore.WriteBatch.prototype.delete = function(docRef, ...args) {
+        if (!this._touchedCols) this._touchedCols = new Set();
+        const path = docRef.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) this._touchedCols.add(parts[0]);
+        return origBatchDelete.call(this, docRef, ...args);
+      };
+
+      firebase.firestore.WriteBatch.prototype.commit = async function(...args) {
+        const res = await origBatchCommit.apply(this, args);
+        if (this._touchedCols) {
+          this._touchedCols.forEach(col => triggerSync(col));
+        }
+        return res;
+      };
+
+      // 4. Transaction prototype
+      const origTxSet = firebase.firestore.Transaction.prototype.set;
+      const origTxUpdate = firebase.firestore.Transaction.prototype.update;
+      const origTxDelete = firebase.firestore.Transaction.prototype.delete;
+
+      firebase.firestore.Transaction.prototype.set = function(docRef, ...args) {
+        if (!this._touchedCols) this._touchedCols = new Set();
+        const path = docRef.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) this._touchedCols.add(parts[0]);
+        return origTxSet.call(this, docRef, ...args);
+      };
+
+      firebase.firestore.Transaction.prototype.update = function(docRef, ...args) {
+        if (!this._touchedCols) this._touchedCols = new Set();
+        const path = docRef.path || '';
+        const parts = path.split('/');
+        if (parts.length > 0) this._touchedCols.add(parts[0]);
+        return origTxUpdate.call(this, docRef, ...args);
+      };
+
+      // 5. Firestore runTransaction prototype
+      const origRunTransaction = firebase.firestore.Firestore.prototype.runTransaction;
+      firebase.firestore.Firestore.prototype.runTransaction = function(updateFunction, ...args) {
+        return origRunTransaction.call(this, async (transaction) => {
+          const res = await updateFunction(transaction);
+          if (transaction._touchedCols) {
+            transaction._touchedCols.forEach(col => triggerSync(col));
+          }
+          return res;
+        }, ...args);
+      };
+
+    } catch (e) {
+      console.warn("Failed to override Firestore prototype methods:", e);
+    }
   }
 
   function initializeFirebase(config) {
     if (firebase.apps.length === 0) {
       firebase.initializeApp(config);
     }
-    const rawDb = firebase.firestore();
-    db = wrapFirestore(rawDb);
+    db = firebase.firestore();
+    overrideFirestorePrototypes();
     try {
       storage = firebase.storage();
       storage.setMaxUploadRetryTime(3000);
@@ -1659,7 +1647,7 @@
         const cfg = cfgDoc.exists ? cfgDoc.data() : SETTINGS_DEFAULTS;
         const totalFmt = res.data.total;
         
-        await logActivity(uid, 'sale', 'sales', res.id, `Sale ${totalFmt} (${lines.length} lines)`);
+        await logActivity(uid, 'sale', 'sales', res.id, `Sale ${totalFmt} (${res.data.items.length} lines)`);
         return res;
       }).catch(err => {
         return { success: false, message: err.message };
@@ -1936,6 +1924,11 @@
       const uid = await gate(token, 'pos', 'e');
       if (!uid) return err('Access denied');
 
+      const instSnap = await db.collection('installments').where('sale_id', '==', Number(saleId)).where('status', '==', 'pending').get();
+      const pend = [];
+      instSnap.forEach(d => { if (!d.data().deleted) pend.push(d.data()); });
+      pend.sort((a, b) => a.due_date.localeCompare(b.due_date));
+
       const saleRef = db.collection('sales').doc(String(saleId));
 
       return db.runTransaction(async (transaction) => {
@@ -1976,11 +1969,7 @@
           id: paymentId, customer_id: s.customer_id || null, ref_type: 'sale', ref_id: s.id, amount: amt, method, note: '', user_id: uid, created: nowIso, updated: nowIso, deleted: 0
         });
 
-        // Reconcile installments
-        const instSnap = await transaction.get(db.collection('installments').where('sale_id', '==', Number(saleId)).where('status', '==', 'pending'));
-        const pend = [];
-        instSnap.forEach(d => { if (!d.data().deleted) pend.push(d.data()); });
-        pend.sort((a, b) => a.due_date.localeCompare(b.due_date));
+        // Reconcile installments (pend loaded outside transaction)
 
         let gap = amt;
         for (const r of pend) {
@@ -2827,18 +2816,17 @@
       const uid = await gate(token, 'installments', 'a');
       if (!uid) return err('Access denied');
 
+      const instSnap = await db.collection('installments').where('sale_id', '==', Number(saleId)).get();
+      let hasPlan = false;
+      instSnap.forEach(d => { if (!d.data().deleted) hasPlan = true; });
+      if (hasPlan) return err('Installment plan already exists for this sale');
+
       const saleRef = db.collection('sales').doc(String(saleId));
 
       return db.runTransaction(async (transaction) => {
         const saleDoc = await transaction.get(saleRef);
         if (!saleDoc.exists || saleDoc.data().deleted) throw new Error('Sale not found');
         const s = saleDoc.data();
-
-        // check if installments already exist
-        const instSnap = await transaction.get(db.collection('installments').where('sale_id', '==', Number(saleId)));
-        let hasPlan = false;
-        instSnap.forEach(d => { if (!d.data().deleted) hasPlan = true; });
-        if (hasPlan) throw new Error('Installment plan already exists for this sale');
 
         let dp = round2(downPayment);
         if (dp > Number(s.due_amount)) throw new Error('Down payment cannot exceed due amount');
