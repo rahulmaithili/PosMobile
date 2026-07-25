@@ -100,11 +100,199 @@
     return DEFAULT_FIREBASE_CONFIG;
   }
 
+  let lastSyncTime = {};
+  let isListeningToSync = false;
+
+  function startSyncListener() {
+    if (!db || isListeningToSync) return;
+    isListeningToSync = true;
+    
+    const rawDb = db._rawDb || db;
+    // Check first if document exists, if not create it
+    rawDb.collection('system').doc('sync').get().then(doc => {
+      if (!doc.exists) {
+        rawDb.collection('system').doc('sync').set({ init: Date.now() }).catch(() => {});
+      }
+    }).catch(() => {});
+
+    rawDb.collection('system').doc('sync').onSnapshot((doc) => {
+      if (doc && doc.exists) {
+        const data = doc.data();
+        for (const col in data) {
+          if (data[col] !== lastSyncTime[col]) {
+            lastSyncTime[col] = data[col];
+            if (window.triggerLocalRevalidate) {
+              window.triggerLocalRevalidate(col);
+            }
+          }
+        }
+      }
+    }, (err) => {
+      console.warn("Sync listener error:", err);
+      isListeningToSync = false;
+      setTimeout(startSyncListener, 5000);
+    });
+  }
+
+  async function triggerSync(collectionName) {
+    if (collectionName === 'system' || collectionName === 'sessions' || collectionName === 'activity_logs') return;
+    try {
+      if (db) {
+        const rawDb = db._rawDb || db;
+        await rawDb.collection('system').doc('sync').set({
+          [collectionName]: Date.now()
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Sync trigger failed:", e);
+    }
+  }
+
+  function wrapFirestore(rawDb) {
+    const handler = {
+      get(target, prop) {
+        if (prop === '_rawDb') return target;
+        if (prop === 'collection') {
+          return function(collectionName) {
+            const rawCol = target.collection(collectionName);
+            return wrapCollection(rawCol, collectionName);
+          };
+        }
+        if (prop === 'batch') {
+          return function() {
+            const rawBatch = target.batch();
+            return wrapBatch(rawBatch);
+          };
+        }
+        if (prop === 'runTransaction') {
+          return function(updateFunction) {
+            const touched = new Set();
+            return target.runTransaction(async (rawTx) => {
+              const proxiedTx = new Proxy(rawTx, {
+                get(t, p) {
+                  if (p === 'set' || p === 'update' || p === 'delete') {
+                    return function(docRef, ...args) {
+                      const path = docRef.path || '';
+                      const parts = path.split('/');
+                      if (parts.length > 0) {
+                        touched.add(parts[0]);
+                      }
+                      const rawRef = docRef._rawDoc || docRef;
+                      t[p](rawRef, ...args);
+                      return proxiedTx;
+                    };
+                  }
+                  if (p === 'get') {
+                    return function(docRef) {
+                      const rawRef = docRef._rawDoc || docRef;
+                      return t.get(rawRef);
+                    };
+                  }
+                  const v = t[p];
+                  return typeof v === 'function' ? v.bind(t) : v;
+                }
+              });
+              return await updateFunction(proxiedTx);
+            }).then((res) => {
+              touched.forEach(col => triggerSync(col));
+              return res;
+            });
+          };
+        }
+        const val = target[prop];
+        return typeof val === 'function' ? val.bind(target) : val;
+      }
+    };
+    return new Proxy(rawDb, handler);
+  }
+
+  function wrapCollection(rawCol, collectionName) {
+    return new Proxy(rawCol, {
+      get(target, prop) {
+        if (prop === 'doc') {
+          return function(docId) {
+            const rawDoc = target.doc(docId);
+            return wrapDoc(rawDoc, collectionName);
+          };
+        }
+        if (prop === 'add') {
+          return async function(data) {
+            const res = await target.add(data);
+            triggerSync(collectionName);
+            return res;
+          };
+        }
+        const val = target[prop];
+        return typeof val === 'function' ? val.bind(target) : val;
+      }
+    });
+  }
+
+  function wrapDoc(rawDoc, collectionName) {
+    return new Proxy(rawDoc, {
+      get(target, prop) {
+        if (prop === '_rawDoc') return target;
+        if (prop === 'set') {
+          return async function(data, options) {
+            const res = await target.set(data, options);
+            triggerSync(collectionName);
+            return res;
+          };
+        }
+        if (prop === 'update') {
+          return async function(data) {
+            const res = await target.update(data);
+            triggerSync(collectionName);
+            return res;
+          };
+        }
+        if (prop === 'delete') {
+          return async function() {
+            const res = await target.delete();
+            triggerSync(collectionName);
+            return res;
+          };
+        }
+        const val = target[prop];
+        return typeof val === 'function' ? val.bind(target) : val;
+      }
+    });
+  }
+
+  function wrapBatch(rawBatch) {
+    const touchedCollections = new Set();
+    return new Proxy(rawBatch, {
+      get(target, prop) {
+        if (prop === 'set' || prop === 'update' || prop === 'delete') {
+          return function(docRef, ...args) {
+            const path = docRef.path || '';
+            const parts = path.split('/');
+            if (parts.length > 0) {
+              touchedCollections.add(parts[0]);
+            }
+            const rawRef = docRef._rawDoc || docRef;
+            return target[prop](rawRef, ...args);
+          };
+        }
+        if (prop === 'commit') {
+          return async function() {
+            const res = await target.commit();
+            touchedCollections.forEach(col => triggerSync(col));
+            return res;
+          };
+        }
+        const val = target[prop];
+        return typeof val === 'function' ? val.bind(target) : val;
+      }
+    });
+  }
+
   function initializeFirebase(config) {
     if (firebase.apps.length === 0) {
       firebase.initializeApp(config);
     }
-    db = firebase.firestore();
+    const rawDb = firebase.firestore();
+    db = wrapFirestore(rawDb);
     try {
       storage = firebase.storage();
     } catch (e) {
@@ -112,6 +300,7 @@
       storage = null;
     }
     isInitialized = true;
+    startSyncListener();
   }
 
   // Check and show setup wizard if not configured or not seeded
