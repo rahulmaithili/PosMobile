@@ -3687,6 +3687,7 @@
       const [payPurchase, setPayPurchase] = useState(null);
       const [viewPaymentsPur, setViewPaymentsPur] = useState(null);
       const [editPurPay, setEditPurPay] = useState(null);
+      const [editPurEntry, setEditPurEntry] = useState(null);
 
       useEffect(() => { if (res && !res.success) Swal.fire({ icon:'error', title:'Access', text:res.message }); }, [res]);
 
@@ -3742,7 +3743,9 @@
             (r.bill_proof_url ? '<button class="action-icon" data-action="bill_proof" title="View Bill Proof" style="color:var(--navy-accent)"><i class="fas fa-image"></i></button>' : '') +
             '<button class="action-icon" data-action="print_a4" title="Print A4 Purchase Bill" style="color:#0074D9"><i class="fas fa-print"></i></button>' +
             (Number(r.due_amount) > 0 ? '<button class="action-icon edit-icon" data-action="pay" title="Pay Due" style="color:#2e7d32"><i class="fas fa-hand-holding-dollar"></i></button>' : '') +
-            '<button class="action-icon" data-action="payments" title="Payment History" style="color:var(--warning)"><i class="fas fa-history"></i></button>'
+            '<button class="action-icon" data-action="payments" title="Payment History" style="color:var(--warning)"><i class="fas fa-history"></i></button>' +
+            '<button class="action-icon" data-action="edit_pur" title="Edit Purchase" style="color:var(--navy-accent)"><i class="fas fa-edit"></i></button>' +
+            '<button class="action-icon" data-action="del_pur" title="Delete Purchase" style="color:#b91c1c"><i class="fas fa-trash"></i></button>'
         }
       ];
 
@@ -3761,6 +3764,12 @@
           setPayPurchase(row);
         } else if (action === 'payments') {
           setViewPaymentsPur(row);
+        } else if (action === 'edit_pur') {
+          setEditPurEntry(row);
+        } else if (action === 'del_pur') {
+          Swal.fire({ icon:'warning', title:'Delete Purchase Entry?', text:'This will delete the purchase and reverse the stock increments. Invoice: ' + (row.invoice_no || row.id), showCancelButton:true, confirmButtonColor:'var(--danger)', confirmButtonText:'Delete' }).then(r => {
+            if (r.isConfirmed) { setBusy('Deleting…'); gsRun('deleteSupplierPurchase', row.id, userId).then(rr => { setBusy(''); if (rr.success) { Swal.fire({ icon:'success', title:rr.message, timer:1200, showConfirmButton:false }); mutatePurchases(); } else Swal.fire({ icon:'error', title:'Error', text:rr.message }); }); }
+          });
         }
       };
 
@@ -3876,6 +3885,20 @@
               payment={editPurPay}
               onClose={() => setEditPurPay(null)}
               onSave={(amt, method, proof) => saveEditPurPayment(editPurPay.id, amt, method, proof)}
+            />
+          )}
+          {editPurEntry && (
+            <EditSupplierPurchaseModal
+              purchase={editPurEntry}
+              onClose={() => setEditPurEntry(null)}
+              onSave={(data) => {
+                setBusy('Updating…');
+                gsRun('updateSupplierPurchase', editPurEntry.id, data, userId).then(r => {
+                  setBusy('');
+                  if (r.success) { setEditPurEntry(null); Swal.fire({ icon:'success', title:r.message, timer:1200, showConfirmButton:false }); mutatePurchases(); }
+                  else Swal.fire({ icon:'error', title:'Error', text:r.message });
+                });
+              }}
             />
           )}
         </div>
@@ -4146,6 +4169,38 @@
                 </div>
 
                 <div className="form-actions" style={{marginTop:'15px'}}><button type="submit" className="btn btn-primary" disabled={uploading || !cartItems.length}><i className="fas fa-save"></i> Save Purchase Bill</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
+              </form>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function EditSupplierPurchaseModal({ purchase, onClose, onSave }) {
+      const [invoiceNo, setInvoiceNo] = useState(purchase.invoice_no || '');
+      const [billDate, setBillDate] = useState(purchase.bill_date || todayStr());
+      const [notes, setNotes] = useState(purchase.notes || '');
+
+      const submit = (e) => {
+        e.preventDefault();
+        onSave({ invoice_no: invoiceNo.trim(), bill_date: billDate, notes: notes.trim() });
+      };
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'460px'}}>
+            <div className="modal-header"><h3><i className="fas fa-edit"></i> Edit Purchase Entry</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
+            <div className="modal-body">
+              <div className="ins-plan-head" style={{marginBottom:'12px'}}>
+                <div><span className="ins-k">Supplier</span><span className="ins-v">{esc(purchase.supplier_name)}</span></div>
+                <div><span className="ins-k">Total Bill</span><span className="ins-v">{money(purchase.total_amount)}</span></div>
+              </div>
+              <p style={{color:'rgba(255,255,255,0.5)', fontSize:'13px', marginBottom:'12px'}}><i className="fas fa-circle-info"></i> You can edit invoice details and date. To change items or amounts, delete and re-enter the purchase.</p>
+              <form onSubmit={submit}>
+                <div className="form-group"><label><i className="fas fa-file-invoice"></i> Invoice No</label><input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="Invoice number" /></div>
+                <div className="form-group"><label><i className="fas fa-calendar"></i> Bill Date</label><input type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} /></div>
+                <div className="form-group"><label><i className="fas fa-sticky-note"></i> Notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Additional notes…" style={{width:'100%', padding:'8px', borderRadius:'6px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', color:'#fff', resize:'vertical'}} /></div>
+                <div className="form-actions"><button type="submit" className="btn btn-primary"><i className="fas fa-save"></i> Save Changes</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
               </form>
             </div>
           </div>

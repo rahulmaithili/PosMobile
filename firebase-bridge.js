@@ -9,10 +9,10 @@
   // 1. Static Configuration & Constants
   // ==========================================
   const SETTINGS_DEFAULTS = {
-    shop_name:'Rahul Phone Hub', shop_tagline:'Sales · Repairs · Accessories',
+    shop_name:'Rahul Phone Hub', shop_tagline:'Sales Â· Repairs Â· Accessories',
     shop_address:'123 Market Street, Downtown', shop_city:'', shop_country:'',
     shop_phone:'+1 555 0100', shop_email:'hello@phoneshop.demo', shop_website:'', tax_id:'', shop_logo: 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg',
-    currency:'₹', currency_code:'INR', currency_position:'before', currency_decimals:'2',
+    currency:'â‚¹', currency_code:'INR', currency_position:'before', currency_decimals:'2',
     vat_default:'21', enable_vat:'1', low_stock_default:'5',
     invoice_prefix:'INV-', repair_prefix:'RPR-', used_prefix:'UP-',
     date_format:'YYYY-MM-DD', timezone:'GMT+5:30', receipt_size:'80mm',
@@ -734,11 +734,11 @@
         
         if (Number(userDoc.is_deleted) === 1) return err('Invalid username or password');
         if (String(password) !== String(userDoc.password)) {
-          await logActivity(userDoc.id, 'login', 'users', userDoc.id, 'Login failed — bad password');
+          await logActivity(userDoc.id, 'login', 'users', userDoc.id, 'Login failed â€” bad password');
           return err('Invalid username or password');
         }
         if (userDoc.status !== 'active') {
-          await logActivity(userDoc.id, 'login', 'users', userDoc.id, 'Login failed — inactive');
+          await logActivity(userDoc.id, 'login', 'users', userDoc.id, 'Login failed â€” inactive');
           return err('Account is inactive. Contact the owner.');
         }
 
@@ -815,7 +815,7 @@
       if (perm !== 'v' && value) p[pageKey].v = 1;
       
       await roleRef.update({ perms: p });
-      await logActivity(uid, 'role_update', 'roles', roleKey, `${roleKey} · ${pageKey} · ${perm}=${value ? 1 : 0}`);
+      await logActivity(uid, 'role_update', 'roles', roleKey, `${roleKey} Â· ${pageKey} Â· ${perm}=${value ? 1 : 0}`);
       return ok('Saved');
     },
 
@@ -1084,7 +1084,7 @@
       const productsSnap = await db.collection('products').where('supplier_id', '==', Number(id)).get();
       let inUse = false;
       productsSnap.forEach(d => { if (!d.data().deleted) inUse = true; });
-      if (inUse) return err('Supplier has products — reassign or remove them first');
+      if (inUse) return err('Supplier has products â€” reassign or remove them first');
 
       await db.collection('suppliers').doc(String(id)).update({ deleted: 1, updated: new Date().toISOString() });
       await logActivity(uid, 'deletion', 'suppliers', id, 'Deleted supplier');
@@ -1104,7 +1104,7 @@
       purchasesSnap.forEach(doc => {
         const p = doc.data();
         if (Number(p.deleted) !== 1) {
-          p.supplier_name = sm[p.supplier_id] || '—';
+          p.supplier_name = sm[p.supplier_id] || 'â€”';
           data.push(p);
         }
       });
@@ -1215,6 +1215,54 @@
       }).catch(err => {
         return { success: false, message: err.message };
       });
+    },
+
+    deleteSupplierPurchase: async (purchaseId, token) => {
+      const uid = await gate(token, 'suppliers', 'd');
+      if (!uid) return err('Access denied');
+
+      const purchaseRef = db.collection('supplier_purchases').doc(String(purchaseId));
+      const purchaseDoc = await purchaseRef.get();
+      if (!purchaseDoc.exists || purchaseDoc.data().deleted) return err('Purchase not found');
+      const purchase = purchaseDoc.data();
+
+      const nowIso = new Date().toISOString();
+      // Reverse stock for each item in the purchase
+      const batch = db.batch();
+      const items = purchase.items || [];
+      for (const item of items) {
+        if (item.product_id) {
+          const prodRef = db.collection('products').doc(String(item.product_id));
+          const prodDoc = await prodRef.get();
+          if (prodDoc.exists) {
+            const currentStock = Number(prodDoc.data().stock_qty || 0);
+            const qtyToRemove = Number(item.qty || 0);
+            batch.update(prodRef, { stock_qty: Math.max(0, currentStock - qtyToRemove), updated: nowIso });
+          }
+        }
+      }
+      batch.update(purchaseRef, { deleted: 1, updated: nowIso });
+      await batch.commit();
+      await logActivity(uid, 'delete', 'supplier_purchases', purchaseId, `Deleted purchase #${purchase.invoice_no}`);
+      return ok('Purchase entry deleted and stock reversed');
+    },
+
+    updateSupplierPurchase: async (purchaseId, data, token) => {
+      const uid = await gate(token, 'suppliers', 'e');
+      if (!uid) return err('Access denied');
+
+      const purchaseRef = db.collection('supplier_purchases').doc(String(purchaseId));
+      const purchaseDoc = await purchaseRef.get();
+      if (!purchaseDoc.exists || purchaseDoc.data().deleted) return err('Purchase not found');
+
+      const nowIso = new Date().toISOString();
+      const allowedFields = ['invoice_no', 'bill_date', 'notes', 'supplier_name'];
+      const updates = { updated: nowIso };
+      allowedFields.forEach(f => { if (data[f] !== undefined) updates[f] = data[f]; });
+
+      await purchaseRef.update(updates);
+      await logActivity(uid, 'update', 'supplier_purchases', purchaseId, `Updated purchase #${updates.invoice_no || purchaseDoc.data().invoice_no}`);
+      return ok('Purchase updated');
     },
 
     getSupplierPayments: async (purchaseId, token) => {
@@ -1375,7 +1423,7 @@
       productsSnap.forEach(doc => {
         const p = doc.data();
         if (p.deleted) return;
-        p.supplier_name = sup[p.supplier_id] || '—';
+        p.supplier_name = sup[p.supplier_id] || 'â€”';
         p.low = Number(p.stock_qty) <= Number(p.low_stock_alert || shopSettings.low_stock_default || 5);
         data.push(p);
       });
@@ -1400,7 +1448,7 @@
       const moves = [];
       movesSnap.forEach(doc => {
         const m = doc.data();
-        m.user_name = users[m.user_id] || '—';
+        m.user_name = users[m.user_id] || 'â€”';
         moves.push(m);
       });
       moves.sort((a, b) => b.id - a.id);
@@ -1418,7 +1466,7 @@
               created: s.created,
               qty: Number(l.qty),
               unit_price: round2(l.unit_price),
-              currency: s.currency || '₹',
+              currency: s.currency || 'â‚¹',
               currency_code: s.currency_code || 'INR',
               currency_position: s.currency_position || 'before',
               currency_decimals: s.currency_decimals != null ? s.currency_decimals : 2
@@ -1685,9 +1733,9 @@
         const date = m.created.slice(0, 10);
         if (from && date < from) return;
         if (to && date > to) return;
-        m.product_name = pm[m.product_id] || '—';
-        m.user_name = users[m.user_id] || '—';
-        m.supplier_name = m.supplier_id ? (sm[m.supplier_id] || '—') : '—';
+        m.product_name = pm[m.product_id] || 'â€”';
+        m.user_name = users[m.user_id] || 'â€”';
+        m.supplier_name = m.supplier_id ? (sm[m.supplier_id] || 'â€”') : 'â€”';
         data.push(m);
       });
 
@@ -1730,8 +1778,8 @@
         const date = s.created.slice(0, 10);
         if (from && date < from) return;
         if (to && date > to) return;
-        s.customer_name = s.customer_id ? (cm[s.customer_id] || '—') : 'Walk-in';
-        s.cashier_name = um[s.user_id] || '—';
+        s.customer_name = s.customer_id ? (cm[s.customer_id] || 'â€”') : 'Walk-in';
+        s.cashier_name = um[s.user_id] || 'â€”';
         data.push(s);
       });
 
@@ -1869,7 +1917,7 @@
           payment_method: d.payment_method || 'cash', notes: d.notes || '', receipt_printed: 0,
           points_earned: earned, points_redeemed: redeemPts, redeem_value: redeemValue, store_credit_applied: creditApplied,
           returned_total: 0, returned_vat: 0, returned_cogs_restocked: 0, return_status: 'none', items: lines,
-          currency: d.currency || cfg.currency || '₹',
+          currency: d.currency || cfg.currency || 'â‚¹',
           currency_code: d.currency_code || cfg.currency_code || 'INR',
           currency_position: d.currency_position || cfg.currency_position || 'before',
           currency_decimals: d.currency_decimals != null ? d.currency_decimals : (cfg.currency_decimals != null ? cfg.currency_decimals : 2),
@@ -1943,7 +1991,7 @@
         if (!saleDoc.exists || saleDoc.data().deleted) throw new Error('Sale not found');
         const s = saleDoc.data();
 
-        if (s.return_status && s.return_status !== 'none') throw new Error('This sale has returns — void is blocked.');
+        if (s.return_status && s.return_status !== 'none') throw new Error('This sale has returns â€” void is blocked.');
 
         const settingsDoc = await transaction.get(db.collection('system').doc('settings'));
         const cfg = settingsDoc.exists ? settingsDoc.data() : SETTINGS_DEFAULTS;
@@ -2019,8 +2067,8 @@
         const date = r.created.slice(0, 10);
         if (from && date < from) return;
         if (to && date > to) return;
-        r.customer_name = r.customer_id ? (cm[r.customer_id] || '—') : 'Walk-in';
-        r.staff_name = um[r.user_id] || '—';
+        r.customer_name = r.customer_id ? (cm[r.customer_id] || 'â€”') : 'Walk-in';
+        r.staff_name = um[r.user_id] || 'â€”';
         data.push(r);
       });
 
@@ -2050,7 +2098,7 @@
         if (!saleDoc.exists) throw new Error('Sale not found');
         
         const sale = saleDoc.data();
-        if (sale.deleted) throw new Error('This sale was voided — returns do not apply');
+        if (sale.deleted) throw new Error('This sale was voided â€” returns do not apply');
         if (sale.return_status === 'full') throw new Error('Sale already fully returned');
         if (method === 'store_credit' && !sale.customer_id) throw new Error('Store credit needs a customer on the sale');
 
@@ -2074,7 +2122,7 @@
           if (q <= 0) continue;
 
           const remaining = Number(L.qty) - Number(L.returned_qty || 0);
-          if (q > remaining) throw new Error(`Cannot return ${q} of ${L.name} — only ${remaining} left`);
+          if (q > remaining) throw new Error(`Cannot return ${q} of ${L.name} â€” only ${remaining} left`);
 
           const net = round2(L.unit_price * q);
           const vat = round2(net * Number(L.vat_rate) / 100);
@@ -2356,7 +2404,7 @@
       paymentsSnap.forEach(d => {
         const p = d.data();
         if (!p.deleted) {
-          p.user_name = um[p.user_id] || '—';
+          p.user_name = um[p.user_id] || 'â€”';
           payments.push(p);
         }
       });
@@ -2409,7 +2457,7 @@
           id: s.id, invoice_no: s.invoice_no, created: s.created,
           total: round2(s.total), amount_paid: round2(s.amount_paid), due_amount: round2(s.due_amount),
           payment_status: s.payment_status, payment_method: s.payment_method, return_status: s.return_status, items: (s.items || []),
-          currency: s.currency || '₹',
+          currency: s.currency || 'â‚¹',
           currency_code: s.currency_code || 'INR',
           currency_position: s.currency_position || 'before',
           currency_decimals: s.currency_decimals != null ? s.currency_decimals : 2
@@ -2546,7 +2594,7 @@
         const date = e.created.slice(0, 10);
         if (from && date < from) return;
         if (to && date > to) return;
-        e.staff_name = users[e.user_id] || '—';
+        e.staff_name = users[e.user_id] || 'â€”';
         data.push(e);
       });
       data.sort((a, b) => b.id - a.id);
@@ -2613,8 +2661,8 @@
         const date = r.created.slice(0, 10);
         if (from && date < from) return;
         if (to && date > to) return;
-        r.customer_name = r.customer_id ? (cm[r.customer_id] || '—') : 'Walk-in';
-        r.technician_name = um[r.technician_id] || '—';
+        r.customer_name = r.customer_id ? (cm[r.customer_id] || 'â€”') : 'Walk-in';
+        r.technician_name = um[r.technician_id] || 'â€”';
         data.push(r);
       });
 
@@ -2734,7 +2782,7 @@
       let msg = cfg.wa_template || '';
       msg = msg.replace('{name}', c.name)
                .replace('{device}', r.device_name)
-               .replace('{currency}', cfg.currency || '€')
+               .replace('{currency}', cfg.currency || 'â‚¬')
                .replace('{remaining}', r.remaining_amount)
                .replace('{shop}', cfg.shop_name);
 
@@ -2795,7 +2843,7 @@
         const date = u.created.slice(0, 10);
         if (from && date < from) return;
         if (to && date > to) return;
-        u.staff_name = um[u.user_id] || '—';
+        u.staff_name = um[u.user_id] || 'â€”';
         data.push(u);
       });
 
@@ -2892,7 +2940,7 @@
       usedSnap.forEach(d => {
         const u = d.data();
         if (!u.deleted) {
-          hits.push({ date: u.created, type: 'Used Purchase', ref: '#' + u.id, detail: `Bought from ${u.seller_name} for €${u.purchase_price}` });
+          hits.push({ date: u.created, type: 'Used Purchase', ref: '#' + u.id, detail: `Bought from ${u.seller_name} for â‚¬${u.purchase_price}` });
         }
       });
 
@@ -2903,7 +2951,7 @@
         (s.items || []).forEach(item => {
           // simple regex check inside item notes or description for IMEI matching
           if (s.notes.indexOf(imei) !== -1 || item.name.indexOf(imei) !== -1) {
-            hits.push({ date: s.created, type: 'Sale', ref: s.invoice_no, detail: `Sold to Customer for €${s.total}` });
+            hits.push({ date: s.created, type: 'Sale', ref: s.invoice_no, detail: `Sold to Customer for â‚¬${s.total}` });
           }
         });
       });
@@ -2913,7 +2961,7 @@
         const r = d.data();
         if (r.deleted) return;
         if (r.serial_no === imei) {
-          hits.push({ date: r.created, type: 'Repair', ref: r.ticket_no, detail: `${r.device_name} — status: ${r.status}, cost: €${r.total_cost}` });
+          hits.push({ date: r.created, type: 'Repair', ref: r.ticket_no, detail: `${r.device_name} â€” status: ${r.status}, cost: â‚¬${r.total_cost}` });
         }
       });
 
@@ -2987,7 +3035,7 @@
 
         const float = Number(openShift.opening_float);
         openShift.expected_cash = round2(float + cashIn - cashOut);
-        openShift.opened_by_name = um[openShift.user_id] || '—';
+        openShift.opened_by_name = um[openShift.user_id] || 'â€”';
       }
 
       // Load history
@@ -2997,8 +3045,8 @@
         const item = doc.data();
         if (item.deleted) return;
         
-        item.opened_by_name = um[item.user_id] || '—';
-        item.closed_by_name = item.status === 'closed' ? (um[item.closed_by_user_id || item.user_id] || '—') : '—';
+        item.opened_by_name = um[item.user_id] || 'â€”';
+        item.closed_by_name = item.status === 'closed' ? (um[item.closed_by_user_id || item.user_id] || 'â€”') : 'â€”';
         item.counted_cash = item.actual_cash || 0;
         item.variance = item.status === 'closed' ? round2(item.counted_cash - item.expected_cash) : 0;
         
@@ -3034,7 +3082,7 @@
       };
 
       await db.collection('cash_drawer').doc(String(id)).set(record);
-      await logActivity(uid, 'drawer_open', 'cash_drawer', id, `Opened cash drawer with float: €${openingFloat}`);
+      await logActivity(uid, 'drawer_open', 'cash_drawer', id, `Opened cash drawer with float: â‚¬${openingFloat}`);
       return ok('Drawer opened');
     },
 
@@ -3064,7 +3112,7 @@
         updated: nowIso
       });
 
-      await logActivity(uid, 'drawer_close', 'cash_drawer', id, `Closed shift. Counted: €${counted}, Expected: €${expected} (Diff: €${diff > 0 ? '+' : ''}${diff})`);
+      await logActivity(uid, 'drawer_close', 'cash_drawer', id, `Closed shift. Counted: â‚¬${counted}, Expected: â‚¬${expected} (Diff: â‚¬${diff > 0 ? '+' : ''}${diff})`);
       return ok('Drawer closed successfully', { expected, actual: counted, difference: diff });
     },
 
@@ -3083,7 +3131,7 @@
       snapshot.forEach(doc => {
         const r = doc.data();
         if (r.deleted) return;
-        r.customer_name = cm[r.customer_id] || '—';
+        r.customer_name = cm[r.customer_id] || 'â€”';
         r.invoice_no = saleMap[r.sale_id] || ('#' + r.sale_id);
         r.remaining_amount = round2(r.amount - r.paid_amount);
         data.push(r);
@@ -3104,7 +3152,7 @@
         const s = doc.data();
         // sales that are unpaid or partial AND do not already have installments
         if (!s.deleted && Number(s.due_amount) > 0) {
-          s.customer_name = cm[s.customer_id] || '—';
+          s.customer_name = cm[s.customer_id] || 'â€”';
           data.push(s);
         }
       });
@@ -3486,7 +3534,7 @@
         if (r.due_date <= today) {
           const c = custMapD[r.customer_id] || {};
           installmentsDue.push({
-            id: r.id, customer_name: c.name || '—', customer_phone: c.phone || '',
+            id: r.id, customer_name: c.name || 'â€”', customer_phone: c.phone || '',
             invoice_no: '#' + r.sale_id, due_date: r.due_date, due: round2(r.amount - (r.paid_amount || 0))
           });
         }
@@ -3681,130 +3729,151 @@
     },
 
     getRojnamcha: async (dateStr, token) => {
-      const uid = await gate(token, 'reports', 'v').catch(() => null) || await gate(token, 'cash_drawer', 'v').catch(() => null);
+      // Allow users with 'reports' OR 'cash_drawer' view permission
+      let uid = null;
+      try { uid = await gate(token, 'reports', 'v'); } catch(e) {}
+      if (!uid) { try { uid = await gate(token, 'cash_drawer', 'v'); } catch(e) {} }
       if (!uid) return err('Access denied');
 
-      const targetDate = dateStr;
-      
-      // 1. Fetch Sales
-      const salesSnap = await db.collection('sales').get();
-      const sales = [];
-      let totalSales = 0;
-      let totalDiscount = 0;
-      const salesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
-      salesSnap.forEach(d => {
-        const s = d.data();
-        if (s.deleted) return;
-        if (s.created.slice(0, 10) === targetDate) {
-          sales.push(s);
-          totalSales = round2(totalSales + Number(s.total || 0));
-          totalDiscount = round2(totalDiscount + Number(s.discount || 0));
-          const method = (s.payment_method || 'cash').toLowerCase();
-          salesByMethod[method] = round2((salesByMethod[method] || 0) + Number(s.total || 0));
-        }
-      });
+      const targetDate = String(dateStr || '').slice(0, 10);
+      if (!targetDate) return err('Invalid date');
 
-      // 2. Fetch Repairs
-      const repairsSnap = await db.collection('repairs').get();
-      const repairs = [];
+      // Safely convert Firestore Timestamp OR ISO string to YYYY-MM-DD
+      const toDateStr = (val) => {
+        if (!val) return '';
+        if (typeof val === 'string') return val.slice(0, 10);
+        if (typeof val.toDate === 'function') return val.toDate().toISOString().slice(0, 10);
+        if (val.seconds) return new Date(val.seconds * 1000).toISOString().slice(0, 10);
+        return String(val).slice(0, 10);
+      };
+
+      // 1. Sales (revenue inflow)
+      let totalSales = 0, totalDiscount = 0;
+      const salesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      try {
+        const salesSnap = await db.collection('sales').get();
+        salesSnap.forEach(d => {
+          const s = d.data();
+          if (s.deleted) return;
+          if (toDateStr(s.created) === targetDate) {
+            totalSales = round2(totalSales + Number(s.total || 0));
+            totalDiscount = round2(totalDiscount + Number(s.discount || 0));
+            const method = (s.payment_method || 'cash').toLowerCase();
+            salesByMethod[method] = round2((salesByMethod[method] || 0) + Number(s.total || 0));
+          }
+        });
+      } catch(e) { console.warn('Rojnamcha sales err:', e.message); }
+
+      // 2. Repair payments received (from 'payments' collection ref_type='repair')
       let totalRepairs = 0;
       const repairsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
-      repairsSnap.forEach(d => {
-        const r = d.data();
-        if (r.deleted) return;
-        const date = (r.updated || r.created).slice(0, 10);
-        if (date === targetDate) {
-          repairs.push(r);
-          totalRepairs = round2(totalRepairs + Number(r.paid_amount || 0));
-          const method = (r.payment_method || 'cash').toLowerCase();
-          repairsByMethod[method] = round2((repairsByMethod[method] || 0) + Number(r.paid_amount || 0));
-        }
-      });
+      try {
+        const repPaySnap = await db.collection('payments').where('ref_type', '==', 'repair').get();
+        repPaySnap.forEach(d => {
+          const p = d.data();
+          if (p.deleted) return;
+          if (toDateStr(p.created) === targetDate) {
+            totalRepairs = round2(totalRepairs + Number(p.amount || 0));
+            const method = (p.method || 'cash').toLowerCase();
+            repairsByMethod[method] = round2((repairsByMethod[method] || 0) + Number(p.amount || 0));
+          }
+        });
+      } catch(e) { console.warn('Rojnamcha repairs err:', e.message); }
 
-      // 3. Fetch Used Phones purchases (Outflow)
-      const usedSnap = await db.collection('used_phones').get();
-      let totalUsedSpend = 0;
-      const usedSpendByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
-      usedSnap.forEach(d => {
-        const u = d.data();
-        if (u.deleted) return;
-        if (u.created.slice(0, 10) === targetDate) {
-          totalUsedSpend = round2(totalUsedSpend + Number(u.purchase_price || 0));
-          const method = (u.payment_method || 'cash').toLowerCase();
-          usedSpendByMethod[method] = round2((usedSpendByMethod[method] || 0) + Number(u.purchase_price || 0));
-        }
-      });
-
-      // 4. Fetch Expenses (Outflow)
-      const expensesSnap = await db.collection('expenses').get();
-      let totalExpenses = 0;
-      const expensesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
-      expensesSnap.forEach(d => {
-        const e = d.data();
-        if (e.deleted) return;
-        if (e.created.slice(0, 10) === targetDate) {
-          totalExpenses = round2(totalExpenses + Number(e.amount || 0));
-          const method = (e.payment_method || 'cash').toLowerCase();
-          expensesByMethod[method] = round2((expensesByMethod[method] || 0) + Number(e.amount || 0));
-        }
-      });
-
-      // 5. Fetch Supplier Purchases (Outflow)
-      const purchasesSnap = await db.collection('supplier_purchases').get();
-      let totalSupplierPurchases = 0;
-      purchasesSnap.forEach(d => {
-        const p = d.data();
-        if (p.deleted) return;
-        if (p.bill_date === targetDate) {
-          totalSupplierPurchases = round2(totalSupplierPurchases + Number(p.total_amount || 0));
-        }
-      });
-
-      // 6. Fetch Supplier Payments (Outflow)
-      const supplierPaymentsSnap = await db.collection('supplier_payments').get();
-      let totalSupplierPayments = 0;
-      const supplierPaymentsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
-      supplierPaymentsSnap.forEach(d => {
-        const sp = d.data();
-        if (sp.deleted) return;
-        const date = (sp.payment_date || sp.created).slice(0, 10);
-        if (date === targetDate) {
-          totalSupplierPayments = round2(totalSupplierPayments + Number(sp.amount || 0));
-          const method = (sp.method || 'cash').toLowerCase();
-          supplierPaymentsByMethod[method] = round2((supplierPaymentsByMethod[method] || 0) + Number(sp.amount || 0));
-        }
-      });
-
-      // 7. Fetch Installment Payments (Inflow)
-      const installmentPaymentsSnap = await db.collection('installment_payments').get();
+      // 3. Sale due / EMI payments received (from 'payments' collection ref_type='sale')
       let totalInstallments = 0;
       const installmentsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
-      installmentPaymentsSnap.forEach(d => {
-        const ip = d.data();
-        if (ip.deleted) return;
-        if (ip.created.slice(0, 10) === targetDate) {
-          totalInstallments = round2(totalInstallments + Number(ip.amount || 0));
-          const method = (ip.method || 'cash').toLowerCase();
-          installmentsByMethod[method] = round2((installmentsByMethod[method] || 0) + Number(ip.amount || 0));
-        }
-      });
-
-      // 8. Fetch Cash Drawer shifts for opening balance
-      const drawerSnap = await db.collection('cash_drawer_shifts').get();
-      let openingBalance = 0;
-      let closingBalance = 0;
-      let isTillOpen = false;
-      drawerSnap.forEach(d => {
-        const s = d.data();
-        if (s.opened_at.slice(0, 10) === targetDate) {
-          openingBalance = Number(s.opening_cash) || 0;
-          if (s.closed_at) {
-            closingBalance = Number(s.closed_cash) || 0;
-          } else {
-            isTillOpen = true;
+      try {
+        const salePaySnap = await db.collection('payments').where('ref_type', '==', 'sale').get();
+        salePaySnap.forEach(d => {
+          const p = d.data();
+          if (p.deleted) return;
+          if (toDateStr(p.created) === targetDate) {
+            totalInstallments = round2(totalInstallments + Number(p.amount || 0));
+            const method = (p.method || 'cash').toLowerCase();
+            installmentsByMethod[method] = round2((installmentsByMethod[method] || 0) + Number(p.amount || 0));
           }
-        }
-      });
+        });
+      } catch(e) { console.warn('Rojnamcha installments err:', e.message); }
+
+      // 4. Used phones purchase spend (outflow)
+      let totalUsedSpend = 0;
+      const usedSpendByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      try {
+        const usedSnap = await db.collection('used_phones').get();
+        usedSnap.forEach(d => {
+          const u = d.data();
+          if (u.deleted) return;
+          if (toDateStr(u.created) === targetDate) {
+            totalUsedSpend = round2(totalUsedSpend + Number(u.purchase_price || 0));
+            const method = (u.payment_method || 'cash').toLowerCase();
+            usedSpendByMethod[method] = round2((usedSpendByMethod[method] || 0) + Number(u.purchase_price || 0));
+          }
+        });
+      } catch(e) { console.warn('Rojnamcha used phones err:', e.message); }
+
+      // 5. General expenses (outflow)
+      let totalExpenses = 0;
+      const expensesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      try {
+        const expensesSnap = await db.collection('expenses').get();
+        expensesSnap.forEach(d => {
+          const e = d.data();
+          if (e.deleted) return;
+          if (toDateStr(e.created) === targetDate) {
+            totalExpenses = round2(totalExpenses + Number(e.amount || 0));
+            const method = (e.payment_method || 'cash').toLowerCase();
+            expensesByMethod[method] = round2((expensesByMethod[method] || 0) + Number(e.amount || 0));
+          }
+        });
+      } catch(e) { console.warn('Rojnamcha expenses err:', e.message); }
+
+      // 6. Supplier purchase bills (total PO value this date)
+      let totalSupplierPurchases = 0;
+      try {
+        const purchasesSnap = await db.collection('supplier_purchases').get();
+        purchasesSnap.forEach(d => {
+          const p = d.data();
+          if (p.deleted) return;
+          if (String(p.bill_date || '').slice(0, 10) === targetDate) {
+            totalSupplierPurchases = round2(totalSupplierPurchases + Number(p.total_amount || 0));
+          }
+        });
+      } catch(e) { console.warn('Rojnamcha supplier purchases err:', e.message); }
+
+      // 7. Supplier payments made today (outflow)
+      let totalSupplierPayments = 0;
+      const supplierPaymentsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      try {
+        const supplierPaymentsSnap = await db.collection('supplier_payments').get();
+        supplierPaymentsSnap.forEach(d => {
+          const sp = d.data();
+          if (sp.deleted) return;
+          if (toDateStr(sp.payment_date || sp.created) === targetDate) {
+            totalSupplierPayments = round2(totalSupplierPayments + Number(sp.amount || 0));
+            const method = (sp.method || 'cash').toLowerCase();
+            supplierPaymentsByMethod[method] = round2((supplierPaymentsByMethod[method] || 0) + Number(sp.amount || 0));
+          }
+        });
+      } catch(e) { console.warn('Rojnamcha supplier payments err:', e.message); }
+
+      // 8. Cash drawer opening balance (collection is 'cash_drawer', field 'opening_float')
+      let openingBalance = 0, closingBalance = 0, isTillOpen = false;
+      try {
+        const drawerSnap = await db.collection('cash_drawer').get();
+        drawerSnap.forEach(d => {
+          const s = d.data();
+          if (s.deleted) return;
+          if (toDateStr(s.created) === targetDate) {
+            openingBalance = Number(s.opening_float || s.opening_cash || 0);
+            if (s.status === 'closed') {
+              closingBalance = Number(s.actual_cash || s.closed_cash || 0);
+            } else {
+              isTillOpen = true;
+            }
+          }
+        });
+      } catch(e) { console.warn('Rojnamcha drawer err:', e.message); }
 
       return ok('', {
         sales: { total: totalSales, discount: totalDiscount, breakdown: salesByMethod },
