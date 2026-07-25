@@ -2511,6 +2511,162 @@
         '<div class="row" style="margin-top:30px"><div class="sign">'+sig+'Seller signature</div><div class="sign">Shop representative</div></div>';
     }
 
+    function paymentReceiptHTML(p, plan) {
+      const shop = window.SHOP || {};
+      const currency = shop.currency || '₹';
+      return `
+        <div style="font-family:monospace;font-size:12px;line-height:1.4;max-width:280px;margin:auto">
+          <div style="text-align:center;font-weight:bold;font-size:14px">${esc(shop.name || 'Mobile Shop')}</div>
+          <div style="text-align:center;font-size:10px">${esc(shop.address || '')}</div>
+          <div style="text-align:center;font-size:10px">Phone: ${esc(shop.phone || '')}</div>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <div style="text-align:center;font-weight:bold">PAYMENT RECEIPT</div>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <div><b>Receipt ID:</b> #${p.id}</div>
+          <div><b>Date:</b> ${fmtDate(p.created || new Date())}</div>
+          <div><b>Customer:</b> ${esc(plan.customer_name || 'Customer')}</div>
+          <div><b>Invoice No:</b> ${esc(plan.terms[0].invoice_no || '—')}</div>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <table style="width:100%;font-size:12px">
+            <tr>
+              <td>Amount Paid:</td>
+              <td style="text-align:right;font-weight:bold">${currency}${Number(p.amount).toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td>Payment Method:</td>
+              <td style="text-align:right">${p.method.toUpperCase()}</td>
+            </tr>
+            <tr>
+              <td>Plan Total Financed:</td>
+              <td style="text-align:right">${currency}${Number(plan.total_financed || 0).toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td>Total Paid So Far:</td>
+              <td style="text-align:right">${currency}${Number(plan.amount_paid || 0).toFixed(2)}</td>
+            </tr>
+            <tr style="font-weight:bold">
+              <td>Remaining Due:</td>
+              <td style="text-align:right">${currency}${Number(plan.due_amount || 0).toFixed(2)}</td>
+            </tr>
+          </table>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <div style="text-align:center;font-size:10px">Thank you for your payment!</div>
+        </div>
+      `;
+    }
+
+    function purchaseBillHTML(pur) {
+      const shop = window.SHOP || {};
+      const currency = pur.currency || shop.currency || '₹';
+      const items = pur.items || [];
+      const total = Number(pur.total_amount) || 0;
+      const paid = Number(pur.amount_paid) || 0;
+      const due = Number(pur.due_amount) || 0;
+      
+      const itemsHtml = items.map((item, idx) => `
+        <tr>
+          <td style="border:1px solid #ddd;padding:8px;text-align:center">${idx + 1}</td>
+          <td style="border:1px solid #ddd;padding:8px">${esc(item.product_name)}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:right">${currency}${Number(item.cost_price).toFixed(2)}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:center">${item.qty}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:right">${currency}${Number(item.cost_price * item.qty).toFixed(2)}</td>
+        </tr>
+      `).join('');
+
+      return `
+        <html>
+        <head>
+          <title>Purchase Order #${pur.invoice_no}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #333; margin: 40px; line-height: 1.5; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px; }
+            .shop-title { font-size: 24px; font-weight: bold; margin: 0; }
+            .bill-title { font-size: 28px; font-weight: bold; margin: 0; color: #1e3a8a; }
+            .details { display: flex; justify-content: space-between; margin-bottom: 30px; }
+            .details-block { width: 45%; }
+            .details-block h3 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; color: #555; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+            .details-block p { margin: 4px 0; font-size: 14px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            th { background-color: #f3f4f6; font-weight: bold; border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 14px; }
+            td { font-size: 14px; }
+            .summary { display: flex; justify-content: flex-end; }
+            .summary-table { width: 300px; }
+            .summary-table td { padding: 6px 12px; font-size: 14px; }
+            .summary-table tr.total { font-weight: bold; font-size: 16px; background-color: #f3f4f6; }
+            .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #777; border-top: 1px solid #eee; padding-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <p class="shop-title">${esc(shop.name || 'Mobile POS')}</p>
+              <p style="margin:4px 0;font-size:14px;color:#555">${esc(shop.address || '')}</p>
+              <p style="margin:4px 0;font-size:14px;color:#555">Phone: ${esc(shop.phone || '')}</p>
+            </div>
+            <div style="text-align:right">
+              <p class="bill-title">PURCHASE ORDER</p>
+              <p style="margin:4px 0;font-size:14px"><b>PO Number:</b> #${pur.invoice_no}</p>
+              <p style="margin:4px 0;font-size:14px"><b>Date:</b> ${fmtDate(pur.bill_date)}</p>
+            </div>
+          </div>
+          
+          <div class="details">
+            <div class="details-block">
+              <h3>Supplier Details</h3>
+              <p><b>Name:</b> ${esc(pur.supplier_name)}</p>
+              <p><b>Created By:</b> ${esc(pur.user_name || 'Owner')}</p>
+            </div>
+            <div class="details-block" style="text-align:right">
+              <h3>Purchase Status</h3>
+              <p><b>Payment Status:</b> ${pur.payment_status.toUpperCase()}</p>
+              <p><b>Created On:</b> ${fmtDate(pur.created)}</p>
+            </div>
+          </div>
+          
+          <table>
+            <thead>
+              <tr>
+                <th style="width:5%;text-align:center">#</th>
+                <th style="width:50%">Product Name</th>
+                <th style="width:15%;text-align:right">PO Rate</th>
+                <th style="width:10%;text-align:center">Qty</th>
+                <th style="width:20%;text-align:right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+          
+          <div class="summary">
+            <table class="summary-table">
+              <tr>
+                <td>Subtotal:</td>
+                <td style="text-align:right">${currency}${total.toFixed(2)}</td>
+              </tr>
+              <tr>
+                <td>Amount Paid:</td>
+                <td style="text-align:right;color:#2e7d32">${currency}${paid.toFixed(2)}</td>
+              </tr>
+              <tr class="total">
+                <td>Dues Outstanding:</td>
+                <td style="text-align:right;color:#b91c1c">${currency}${due.toFixed(2)}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div class="footer">
+            <p>Generated automatically by ${esc(shop.name || 'Mobile POS')}. This is a computer generated document.</p>
+          </div>
+          
+          <script>
+            window.onload = function() { window.print(); };
+          </script>
+        </body>
+        </html>
+      `;
+    }
+
     // ---- Chevron pipeline tabs (status filter only) ----
     function PipelineTabs({ stages, active, onPick, total }){
       return (
@@ -3527,6 +3683,7 @@
         { data:'payment_status', title:'Status', render:(d) => statusPill(d) },
         { data:null, title:'Actions', orderable:false, render:(d, t, r) =>
             (r.bill_proof_url ? '<button class="action-icon" data-action="bill_proof" title="View Bill Proof" style="color:var(--navy-accent)"><i class="fas fa-image"></i></button>' : '') +
+            '<button class="action-icon" data-action="print_a4" title="Print A4 Purchase Bill" style="color:#0074D9"><i class="fas fa-print"></i></button>' +
             (Number(r.due_amount) > 0 ? '<button class="action-icon edit-icon" data-action="pay" title="Pay Due" style="color:#2e7d32"><i class="fas fa-hand-holding-dollar"></i></button>' : '') +
             '<button class="action-icon" data-action="payments" title="Payment History" style="color:var(--warning)"><i class="fas fa-history"></i></button>'
         }
@@ -3541,6 +3698,8 @@
             confirmButtonText: 'Close',
             confirmButtonColor: 'var(--navy-primary)'
           });
+        } else if (action === 'print_a4') {
+          printDoc(purchaseBillHTML(row), 'Purchase Order ' + row.invoice_no, 'a4');
         } else if (action === 'pay') {
           setPayPurchase(row);
         } else if (action === 'payments') {
@@ -3643,7 +3802,7 @@
           {show && <SupplierModal supplier={editing} onClose={() => { setShow(false); setEditing(null); }} onSave={save} />}
           {viewS && <SupplierView supplier={viewS} products={allProducts} onClose={() => setViewS(null)} />}
           
-          {showAddPurchase && <CreateSupplierPurchaseModal supplierOpts={supplierOpts} onClose={() => setShowAddPurchase(false)} onSave={addPurchase} />}
+          {showAddPurchase && <CreateSupplierPurchaseModal products={allProducts} supplierOpts={supplierOpts} onClose={() => setShowAddPurchase(false)} onSave={addPurchase} />}
           {payPurchase && <SupplierPayModal purchase={payPurchase} onClose={() => setPayPurchase(null)} onSave={recordPayPur} />}
           {viewPaymentsPur && (
             <SupplierPaymentsModal
@@ -3745,16 +3904,80 @@
       );
     }
 
-    function CreateSupplierPurchaseModal({ supplierOpts, onClose, onSave }) {
+    function CreateSupplierPurchaseModal({ products, supplierOpts, onClose, onSave }) {
       const [supplierId, setSupplierId] = useState('');
       const [invoiceNo, setInvoiceNo] = useState('');
       const [billDate, setBillDate] = useState(todayStr());
-      const [items, setItems] = useState('');
-      const [total, setTotal] = useState('');
+      
+      // Cart items
+      const [cartItems, setCartItems] = useState([]);
+      
+      // Selected product item builder states
+      const [selectedProductId, setSelectedProductId] = useState('');
+      const [poRate, setPoRate] = useState('');
+      const [purchaseQty, setPurchaseQty] = useState('');
+
       const [paid, setPaid] = useState('');
       const [method, setMethod] = useState('cash');
       const [proof, setProof] = useState('');
       const [uploading, setUploading] = useState(false);
+
+      const productOpts = (products || []).map(p => ({ value: p.id, label: p.name + ` (Current Cost: ${money(p.cost_price)})` }));
+      const curProduct = (products || []).find(p => String(p.id) === String(selectedProductId));
+
+      // Update rate default when selecting product
+      useEffect(() => {
+        if (curProduct) {
+          setPoRate(String(curProduct.cost_price || ''));
+        } else {
+          setPoRate('');
+        }
+      }, [selectedProductId]);
+
+      const addItemToCart = () => {
+        if (!selectedProductId) { Swal.fire({ icon:'warning', title:'Select a product first' }); return; }
+        const rate = parseFloat(poRate) || 0;
+        const qty = parseInt(purchaseQty) || 0;
+        if (rate <= 0) { Swal.fire({ icon:'warning', title:'Enter a valid PO Rate' }); return; }
+        if (qty <= 0) { Swal.fire({ icon:'warning', title:'Enter a valid Quantity' }); return; }
+
+        setCartItems(prev => {
+          // Check duplicate
+          const exIdx = prev.findIndex(item => String(item.product_id) === String(selectedProductId));
+          if (exIdx > -1) {
+            Swal.fire({
+              title: 'Product already in bill',
+              text: 'Do you want to update its Qty and Rate?',
+              showCancelButton: true,
+              confirmButtonText: 'Update Item'
+            }).then(res => {
+              if (res.isConfirmed) {
+                setCartItems(prev2 => prev2.map((item, idx) => idx === exIdx ? { ...item, qty, cost_price: rate } : item));
+              }
+            });
+            return prev;
+          }
+          return [...prev, {
+            product_id: Number(selectedProductId),
+            product_name: curProduct.name,
+            qty,
+            cost_price: rate
+          }];
+        });
+
+        // Reset item input fields
+        setSelectedProductId('');
+        setPoRate('');
+        setPurchaseQty('');
+      };
+
+      const removeItem = (idx) => {
+        setCartItems(prev => prev.filter((_, i) => i !== idx));
+      };
+
+      // Sum totals
+      const totalAmount = cartItems.reduce((sum, item) => sum + (item.cost_price * item.qty), 0);
+
       const methodOpts = [{ value:'cash', label:'Cash' }, { value:'card', label:'Card' }, { value:'bank_transfer', label:'Bank Transfer' }, { value:'gpay', label:'GPay' }, { value:'phonepe', label:'PhonePe' }, { value:'other', label:'Other Online' }];
 
       const handleProofUpload = async (e) => {
@@ -3773,17 +3996,20 @@
       const submit = (e) => {
         e.preventDefault();
         if (!supplierId) { Swal.fire({ icon:'warning', title:'Select Supplier' }); return; }
-        const t = parseFloat(total) || 0;
+        if (!cartItems.length) { Swal.fire({ icon:'warning', title:'Add at least one product to the purchase bill' }); return; }
         const p = parseFloat(paid) || 0;
-        if (t <= 0) { Swal.fire({ icon:'warning', title:'Enter a valid total amount' }); return; }
-        if (p > t) { Swal.fire({ icon:'warning', title:'Paid amount cannot exceed total' }); return; }
+        if (p > totalAmount) { Swal.fire({ icon:'warning', title:'Paid amount cannot exceed total bill amount' }); return; }
+
+        // Create summary string
+        const summary = cartItems.map(item => `${item.product_name} (x${item.qty})`).join(', ');
 
         onSave({
           supplier_id: supplierId,
           invoice_no: invoiceNo,
           bill_date: billDate,
-          items_summary: items,
-          total_amount: t,
+          items_summary: summary,
+          items: cartItems,
+          total_amount: totalAmount,
           amount_paid: p,
           method,
           bill_proof_url: proof
@@ -3792,20 +4018,58 @@
 
       return (
         <div className="modal-overlay" onClick={onClose}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'500px'}}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'640px'}}>
             <div className="modal-header"><h3><i className="fas fa-file-invoice-dollar"></i> New Supplier Purchase Bill</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
             <div className="modal-body">
               <form onSubmit={submit}>
                 <div className="form-group"><label><i className="fas fa-truck-field"></i> Supplier *</label><SearchableDropdown options={supplierOpts} value={supplierId} onChange={setSupplierId} placeholder="Select Supplier" /></div>
-                <div className="form-grid">
+                <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
                   <div className="form-group"><label><i className="fas fa-file-invoice"></i> Bill / Invoice No.</label><input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="e.g. INV-1002" /></div>
                   <div className="form-group"><label><i className="fas fa-calendar-day"></i> Bill Date</label><input type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} /></div>
                 </div>
-                <div className="form-group"><label><i className="fas fa-list"></i> Items Bought (Summary) *</label><textarea value={items} onChange={(e) => setItems(e.target.value)} placeholder="What did you buy? e.g. 5x iPhone 13, 20x Screen Protectors" required style={{width:'100%', minHeight:'60px', padding:'8px', borderRadius:'4px', background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.1)', color:'#fff', resize:'vertical'}}></textarea></div>
-                
-                <div className="form-grid">
-                  <div className="form-group"><label><i className="fas fa-sack-dollar"></i> Total Bill Amount *</label><input type="number" step="0.01" min="0.01" value={total} onChange={(e) => setTotal(e.target.value)} required /></div>
-                  <div className="form-group"><label><i className="fas fa-money-bill-wave"></i> Amount Paid Initially</label><input type="number" step="0.01" min="0" value={paid} onChange={(e) => setPaid(e.target.value)} /></div>
+
+                <div style={{border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', padding:'12px', background:'rgba(255,255,255,0.02)', margin:'14px 0'}}>
+                  <h4 style={{margin:'0 0 10px', color:'var(--navy-accent)', fontSize:'14px'}}><i className="fas fa-plus-circle"></i> Add Product Line Items</h4>
+                  
+                  <div className="form-group">
+                    <label><i className="fas fa-box"></i> Product *</label>
+                    <SearchableDropdown options={productOpts} value={selectedProductId} onChange={setSelectedProductId} placeholder="Search product name..." />
+                    <small style={{color:'#778', display:'block', marginTop:'2px'}}>If product isn't listed, first create it with 0 stock in the <b>Products</b> page.</small>
+                  </div>
+
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr auto', gap:'12px', alignItems:'flex-end', marginTop:'8px'}}>
+                    <div className="form-group" style={{margin:0}}><label><i className="fas fa-sack-dollar"></i> PO Rate (Cost Price) *</label><input type="number" step="0.01" min="0" value={poRate} onChange={(e) => setPoRate(e.target.value)} placeholder="Rate" /></div>
+                    <div className="form-group" style={{margin:0}}><label><i className="fas fa-hashtag"></i> Qty *</label><input type="number" min="1" value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} placeholder="Qty" /></div>
+                    <button type="button" className="btn btn-primary" onClick={addItemToCart} style={{padding:'10px 16px', display:'flex', gap:'5px', alignItems:'center'}}><i className="fas fa-plus"></i> Add Item</button>
+                  </div>
+                </div>
+
+                <div className="about-table-wrapper" style={{maxHeight:'200px', overflowY:'auto', marginBottom:'14px'}}>
+                  <table className="about-roles-table" style={{width:'100%'}}>
+                    <thead>
+                      <tr><th>Product</th><th>Rate</th><th>Qty</th><th>Total</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                      {cartItems.length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No items added yet.</td></tr>}
+                      {cartItems.map((item, idx) => (
+                        <tr key={idx}>
+                          <td style={{fontWeight:600}}>{esc(item.product_name)}</td>
+                          <td>{money(item.cost_price)}</td>
+                          <td>{item.qty}</td>
+                          <td style={{fontWeight:'700'}}>{money(item.cost_price * item.qty)}</td>
+                          <td><button type="button" className="action-icon" style={{color:'#b91c1c'}} onClick={() => removeItem(idx)}><i className="fas fa-trash"></i></button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="ins-summary" style={{gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px'}}>
+                  <div className="ins-card"><span>Total Bill Amount</span><b style={{fontSize:'18px'}}>{money(totalAmount)}</b></div>
+                  <div className="ins-card">
+                    <span>Amount Paid Initially</span>
+                    <input type="number" step="0.01" min="0" max={totalAmount} value={paid} onChange={(e) => setPaid(e.target.value)} placeholder="0.00" style={{marginTop:'4px', width:'100%', padding:'6px 10px', background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.1)', color:'#fff', borderRadius:'4px', fontWeight:'700'}} />
+                  </div>
                 </div>
 
                 {parseFloat(paid) > 0 && (
@@ -3824,7 +4088,7 @@
                   )}
                 </div>
 
-                <div className="form-actions" style={{marginTop:'15px'}}><button type="submit" className="btn btn-primary" disabled={uploading}><i className="fas fa-save"></i> Save Bill</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
+                <div className="form-actions" style={{marginTop:'15px'}}><button type="submit" className="btn btn-primary" disabled={uploading || !cartItems.length}><i className="fas fa-save"></i> Save Purchase Bill</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
               </form>
             </div>
           </div>

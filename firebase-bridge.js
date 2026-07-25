@@ -1128,6 +1128,7 @@
         invoice_no: d.invoice_no || '',
         bill_date: d.bill_date || ymd(new Date()),
         items_summary: d.items_summary || '',
+        items: d.items || [],
         total_amount: total,
         amount_paid: paid,
         due_amount: due,
@@ -1139,26 +1140,65 @@
         deleted: 0
       };
 
-      await db.collection('supplier_purchases').doc(String(id)).set(record);
+      return db.runTransaction(async (transaction) => {
+        // 1. Save the purchase record
+        transaction.set(db.collection('supplier_purchases').doc(String(id)), record);
 
-      if (paid > 0) {
-        const paymentId = await getNextId('supplier_payments');
-        await db.collection('supplier_payments').doc(String(paymentId)).set({
-          id: paymentId,
-          purchase_id: id,
-          amount: paid,
-          method: d.method || 'cash',
-          proof_url: d.bill_proof_url || '',
-          payment_date: d.bill_date || ymd(new Date()),
-          user_id: uid,
-          created: nowIso,
-          updated: nowIso,
-          deleted: 0
-        });
-      }
+        // 2. Loop through each item to update product stocks & insert movements
+        for (const item of d.items || []) {
+          const productRef = db.collection('products').doc(String(item.product_id));
+          const prodDoc = await transaction.get(productRef);
+          if (prodDoc.exists && !prodDoc.data().deleted) {
+            const currentStock = Number(prodDoc.data().stock_qty) || 0;
+            const newStock = currentStock + Number(item.qty);
+            
+            // Update stock and cost_price
+            transaction.update(productRef, {
+              stock_qty: newStock,
+              cost_price: round2(item.cost_price),
+              updated: nowIso
+            });
 
-      await logActivity(uid, 'supplier_purchase_add', 'suppliers', id, `Added supplier bill #${d.invoice_no} (${total})`);
-      return ok('Purchase bill entered successfully');
+            // Create inventory movement
+            const movementId = await getNextId('inventory_movements');
+            const movementRef = db.collection('inventory_movements').doc(String(movementId));
+            transaction.set(movementRef, {
+              id: movementId,
+              product_id: Number(item.product_id),
+              user_id: uid,
+              movement_type: 'purchase',
+              qty_change: Number(item.qty),
+              note: `Purchased on Supplier Invoice #${d.invoice_no}`,
+              supplier_id: Number(d.supplier_id),
+              invoice_no: d.invoice_no,
+              created: nowIso,
+              updated: nowIso
+            });
+          }
+        }
+
+        // 3. Save initial payment if any
+        if (paid > 0) {
+          const paymentId = await getNextId('supplier_payments');
+          transaction.set(db.collection('supplier_payments').doc(String(paymentId)), {
+            id: paymentId,
+            purchase_id: id,
+            amount: paid,
+            method: d.method || 'cash',
+            proof_url: d.bill_proof_url || '',
+            payment_date: d.bill_date || ymd(new Date()),
+            user_id: uid,
+            created: nowIso,
+            updated: nowIso,
+            deleted: 0
+          });
+        }
+      }).then(async () => {
+        await logActivity(uid, 'supplier_purchase_add', 'suppliers', id, `Added supplier bill #${d.invoice_no} (${total})`);
+        return ok('Purchase bill entered and stock updated successfully');
+      }).catch(err => {
+        return { success: false, message: err.message };
+      });
     },
 
     getSupplierPayments: async (purchaseId, token) => {
