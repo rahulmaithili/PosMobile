@@ -1091,6 +1091,217 @@
       return ok('Supplier deleted');
     },
 
+    getSupplierPurchases: async (token) => {
+      const uid = await gate(token, 'suppliers', 'v');
+      if (!uid) return err('Access denied');
+
+      const purchasesSnap = await db.collection('supplier_purchases').get();
+      const suppliersSnap = await db.collection('suppliers').get();
+      const sm = {};
+      suppliersSnap.forEach(d => { sm[d.data().id] = d.data().name; });
+
+      const data = [];
+      purchasesSnap.forEach(doc => {
+        const p = doc.data();
+        if (Number(p.deleted) !== 1) {
+          p.supplier_name = sm[p.supplier_id] || '—';
+          data.push(p);
+        }
+      });
+      data.sort((a, b) => b.id - a.id);
+      return ok('', { data });
+    },
+
+    createSupplierPurchase: async (d, token) => {
+      const uid = await gate(token, 'suppliers', 'a');
+      if (!uid) return err('Access denied');
+
+      const id = await getNextId('supplier_purchases');
+      const nowIso = new Date().toISOString();
+      const total = round2(d.total_amount) || 0;
+      const paid = round2(d.amount_paid) || 0;
+      const due = round2(total - paid);
+      
+      const record = {
+        id,
+        supplier_id: Number(d.supplier_id),
+        invoice_no: d.invoice_no || '',
+        bill_date: d.bill_date || ymd(new Date()),
+        items_summary: d.items_summary || '',
+        total_amount: total,
+        amount_paid: paid,
+        due_amount: due,
+        payment_status: due <= 0 ? 'paid' : (paid <= 0 ? 'unpaid' : 'partial'),
+        bill_proof_url: d.bill_proof_url || '',
+        user_id: uid,
+        created: nowIso,
+        updated: nowIso,
+        deleted: 0
+      };
+
+      await db.collection('supplier_purchases').doc(String(id)).set(record);
+
+      if (paid > 0) {
+        const paymentId = await getNextId('supplier_payments');
+        await db.collection('supplier_payments').doc(String(paymentId)).set({
+          id: paymentId,
+          purchase_id: id,
+          amount: paid,
+          method: d.method || 'cash',
+          proof_url: d.bill_proof_url || '',
+          payment_date: d.bill_date || ymd(new Date()),
+          user_id: uid,
+          created: nowIso,
+          updated: nowIso,
+          deleted: 0
+        });
+      }
+
+      await logActivity(uid, 'supplier_purchase_add', 'suppliers', id, `Added supplier bill #${d.invoice_no} (${total})`);
+      return ok('Purchase bill entered successfully');
+    },
+
+    getSupplierPayments: async (purchaseId, token) => {
+      const uid = await gate(token, 'suppliers', 'v');
+      if (!uid) return err('Access denied');
+
+      const snapshot = await db.collection('supplier_payments')
+        .where('purchase_id', '==', Number(purchaseId))
+        .get();
+      const data = [];
+      snapshot.forEach(doc => {
+        const p = doc.data();
+        if (Number(p.deleted) !== 1) data.push(p);
+      });
+      data.sort((a, b) => b.id - a.id);
+      return ok('', { data });
+    },
+
+    recordSupplierPayment: async (purchaseId, amount, method, proofUrl, token) => {
+      const uid = await gate(token, 'suppliers', 'e');
+      if (!uid) return err('Access denied');
+
+      const purchaseRef = db.collection('supplier_purchases').doc(String(purchaseId));
+
+      return db.runTransaction(async (transaction) => {
+        const purDoc = await transaction.get(purchaseRef);
+        if (!purDoc.exists || purDoc.data().deleted) throw new Error('Purchase record not found');
+        const pur = purDoc.data();
+
+        let amt = round2(amount);
+        const due = round2(pur.due_amount);
+        amt = round2(Math.min(amt, due));
+        if (amt <= 0) throw new Error('Enter a valid amount');
+
+        const nowIso = new Date().toISOString();
+        const newPaid = round2(Number(pur.amount_paid) + amt);
+        const newDue = round2(Math.max(0, Number(pur.total_amount) - newPaid));
+
+        transaction.update(purchaseRef, {
+          amount_paid: newPaid,
+          due_amount: newDue,
+          payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'),
+          updated: nowIso
+        });
+
+        const paymentId = await getNextId('supplier_payments');
+        transaction.set(db.collection('supplier_payments').doc(String(paymentId)), {
+          id: paymentId,
+          purchase_id: Number(purchaseId),
+          amount: amt,
+          method,
+          proof_url: proofUrl || '',
+          payment_date: ymd(new Date()),
+          user_id: uid,
+          created: nowIso,
+          updated: nowIso,
+          deleted: 0
+        });
+      }).then(() => {
+        return ok('Payment recorded successfully');
+      }).catch(err => {
+        return { success: false, message: err.message };
+      });
+    },
+
+    updateSupplierPayment: async (paymentId, amount, method, proofUrl, token) => {
+      const uid = await gate(token, 'suppliers', 'e');
+      if (!uid) return err('Access denied');
+
+      const payRef = db.collection('supplier_payments').doc(String(paymentId));
+
+      return db.runTransaction(async (transaction) => {
+        const payDoc = await transaction.get(payRef);
+        if (!payDoc.exists || payDoc.data().deleted) throw new Error('Payment not found');
+        const p = payDoc.data();
+
+        const purchaseRef = db.collection('supplier_purchases').doc(String(p.purchase_id));
+        const purDoc = await transaction.get(purchaseRef);
+        if (!purDoc.exists) throw new Error('Purchase record not found');
+        const pur = purDoc.data();
+
+        const oldAmt = round2(p.amount);
+        const newAmt = round2(amount);
+        const diff = round2(newAmt - oldAmt);
+
+        const newPaid = round2(Number(pur.amount_paid) + diff);
+        const newDue = round2(Math.max(0, Number(pur.total_amount) - newPaid));
+
+        transaction.update(purchaseRef, {
+          amount_paid: newPaid,
+          due_amount: newDue,
+          payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'),
+          updated: new Date().toISOString()
+        });
+
+        transaction.update(payRef, {
+          amount: newAmt,
+          method,
+          proof_url: proofUrl || '',
+          updated: new Date().toISOString()
+        });
+      }).then(() => {
+        return ok('Payment updated successfully');
+      }).catch(err => {
+        return { success: false, message: err.message };
+      });
+    },
+
+    deleteSupplierPayment: async (paymentId, token) => {
+      const uid = await gate(token, 'suppliers', 'd');
+      if (!uid) return err('Access denied');
+
+      const payRef = db.collection('supplier_payments').doc(String(paymentId));
+
+      return db.runTransaction(async (transaction) => {
+        const payDoc = await transaction.get(payRef);
+        if (!payDoc.exists || payDoc.data().deleted) throw new Error('Payment not found');
+        const p = payDoc.data();
+
+        const purchaseRef = db.collection('supplier_purchases').doc(String(p.purchase_id));
+        const purDoc = await transaction.get(purchaseRef);
+        if (!purDoc.exists) throw new Error('Purchase record not found');
+        const pur = purDoc.data();
+
+        const amt = round2(p.amount);
+        const newPaid = round2(Math.max(0, Number(pur.amount_paid) - amt));
+        const newDue = round2(Number(pur.total_amount) - newPaid);
+
+        transaction.update(purchaseRef, {
+          amount_paid: newPaid,
+          due_amount: newDue,
+          payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'),
+          updated: new Date().toISOString()
+        });
+
+        transaction.update(payRef, { deleted: 1, updated: new Date().toISOString() });
+      }).then(() => {
+        return ok('Payment deleted successfully');
+      }).catch(err => {
+        return { success: false, message: err.message };
+      });
+    },
+
     // ---- Products ----
     getProducts: async (token) => {
       const uid = await gate(token, 'products', 'v');
