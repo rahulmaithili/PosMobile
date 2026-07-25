@@ -2652,70 +2652,90 @@
       let openShift = null;
       cdSnap.forEach(d => { if (!d.data().deleted) openShift = d.data(); });
       
-      if (!openShift) return ok('', { data: null });
-
-      // Compute expected cash in drawer
-      const since = openShift.created;
-      
-      const salesSnap = await db.collection('sales').where('created', '>=', since).get();
-      const repairsSnap = await db.collection('repairs').where('created', '>=', since).get();
-      const paymentsSnap = await db.collection('payments').where('created', '>=', since).get();
-      const expensesSnap = await db.collection('expenses').where('created', '>=', since).get();
-      const returnsSnap = await db.collection('returns').where('created', '>=', since).get();
-
-      let cashIn = 0;
-      let cashOut = 0;
-
-      // Sale cash payments
-      salesSnap.forEach(d => {
-        const s = d.data();
-        if (s.deleted) return;
-        if (s.payment_method === 'cash') {
-          // cash_applied is total - store_credit - points - unpaid
-          const ptsVal = s.redeem_value || 0;
-          const storeCreditVal = s.store_credit_applied || 0;
-          const due = s.due_amount || 0;
-          cashIn += (s.total - ptsVal - storeCreditVal - due);
-        }
-      });
-
-      // Repair cash payments
-      repairsSnap.forEach(d => {
-        const r = d.data();
-        if (r.deleted) return;
-        // initial cash deposits
-        if (r.paid_amount > 0) {
-          cashIn += r.paid_amount;
-        }
-      });
-
-      // Subsequent ledger payments
-      paymentsSnap.forEach(d => {
-        const p = d.data();
-        if (p.deleted && p.method === 'cash') return;
-        if (p.method === 'cash') cashIn += p.amount;
-      });
-
-      // Expenses
-      expensesSnap.forEach(d => {
-        const e = d.data();
-        if (!e.deleted) cashOut += e.amount;
-      });
-
-      // Returns refunded in cash
-      returnsSnap.forEach(d => {
-        const r = d.data();
-        if (!r.deleted && r.refund_method === 'cash') cashOut += r.cash_refunded;
-      });
-
-      const float = Number(openShift.opening_float);
-      const expected = round2(float + cashIn - cashOut);
-
       const um = await resolveUserNames();
-      openShift.staff_name = um[openShift.user_id] || '—';
-      openShift.expected_cash = expected;
 
-      return ok('', { data: openShift });
+      if (openShift) {
+        // Compute expected cash in drawer
+        const since = openShift.created;
+        
+        const salesSnap = await db.collection('sales').where('created', '>=', since).get();
+        const repairsSnap = await db.collection('repairs').where('created', '>=', since).get();
+        const paymentsSnap = await db.collection('payments').where('created', '>=', since).get();
+        const expensesSnap = await db.collection('expenses').where('created', '>=', since).get();
+        const returnsSnap = await db.collection('returns').where('created', '>=', since).get();
+
+        let cashIn = 0;
+        let cashOut = 0;
+
+        // Sale cash payments
+        salesSnap.forEach(d => {
+          const s = d.data();
+          if (s.deleted) return;
+          if (s.payment_method === 'cash') {
+            const ptsVal = s.redeem_value || 0;
+            const storeCreditVal = s.store_credit_applied || 0;
+            const due = s.due_amount || 0;
+            cashIn += (s.total - ptsVal - storeCreditVal - due);
+          }
+        });
+
+        // Repair cash payments
+        repairsSnap.forEach(d => {
+          const r = d.data();
+          if (r.deleted) return;
+          if (r.paid_amount > 0) {
+            cashIn += r.paid_amount;
+          }
+        });
+
+        // Subsequent ledger payments
+        paymentsSnap.forEach(d => {
+          const p = d.data();
+          if (p.deleted) return;
+          if (p.method === 'cash') cashIn += p.amount;
+        });
+
+        // Expenses
+        expensesSnap.forEach(d => {
+          const e = d.data();
+          if (!e.deleted) cashOut += e.amount;
+        });
+
+        // Returns refunded in cash
+        returnsSnap.forEach(d => {
+          const r = d.data();
+          if (!r.deleted && r.refund_method === 'cash') cashOut += r.cash_refunded;
+        });
+
+        const float = Number(openShift.opening_float);
+        openShift.expected_cash = round2(float + cashIn - cashOut);
+        openShift.opened_by_name = um[openShift.user_id] || '—';
+      }
+
+      // Load history
+      const allSnap = await db.collection('cash_drawer').get();
+      const historyList = [];
+      allSnap.forEach(doc => {
+        const item = doc.data();
+        if (item.deleted) return;
+        
+        item.opened_by_name = um[item.user_id] || '—';
+        item.closed_by_name = item.status === 'closed' ? (um[item.closed_by_user_id || item.user_id] || '—') : '—';
+        item.counted_cash = item.actual_cash || 0;
+        item.variance = item.status === 'closed' ? round2(item.counted_cash - item.expected_cash) : 0;
+        
+        historyList.push(item);
+      });
+
+      // Sort history descending by created date
+      historyList.sort((a, b) => b.created.localeCompare(a.created));
+
+      return ok('', {
+        data: {
+          open: openShift,
+          history: historyList
+        }
+      });
     },
 
     openTill: async (openingFloat, token) => {
@@ -2750,7 +2770,7 @@
 
       // Recalculate expected cash
       const statusRes = await bridge.getCashDrawerStatus(token);
-      const expected = statusRes.data.expected_cash;
+      const expected = statusRes.data.open.expected_cash;
 
       const counted = round2(countedCash);
       const diff = round2(counted - expected);
@@ -2762,6 +2782,7 @@
         status: 'closed',
         notes: notes || '',
         closed_at: nowIso,
+        closed_by_user_id: uid,
         updated: nowIso
       });
 
