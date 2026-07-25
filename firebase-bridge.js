@@ -89,7 +89,10 @@
     try {
       const configStr = localStorage.getItem('firebaseConfig');
       if (configStr) {
-        return JSON.parse(configStr);
+        const parsed = JSON.parse(configStr);
+        if (parsed && parsed.apiKey && !parsed.apiKey.includes('...')) {
+          return parsed;
+        }
       }
     } catch(e) {
       console.error("Failed to parse firebaseConfig from localStorage:", e);
@@ -114,7 +117,7 @@
   // Check and show setup wizard if not configured or not seeded
   window.addEventListener('DOMContentLoaded', async () => {
     const config = loadFirebaseConfig();
-    if (config && config.apiKey && !config.apiKey.startsWith("AIzaSy...")) {
+    if (config && config.apiKey && !config.apiKey.includes('...')) {
       try {
         initializeFirebase(config);
         // Check if database is seeded by querying system counters document
@@ -124,14 +127,15 @@
         }
       } catch (e) {
         console.error("Firebase init failed, showing full setup wizard:", e);
-        showSetupWizard(false); // full setup mode
+        showSetupWizard(false, `Firebase connection failed: ${e.message || e}. Please verify your Firestore Database settings & Security Rules in the Firebase Console.`);
       }
     } else {
       showSetupWizard(false);
     }
   });
 
-  function showSetupWizard(readyToSeed = false) {
+  function showSetupWizard(readyToSeed = false, errorMsg = "") {
+    const config = loadFirebaseConfig() || {};
     const overlay = document.createElement('div');
     overlay.id = 'firebase-setup-overlay';
     overlay.innerHTML = `
@@ -198,31 +202,34 @@
             ? 'Firebase is successfully connected to your project! <br/>Click below to initialize and seed your Firestore database.' 
             : 'Connect your Mobile Shop POS system to Firebase.<br/>Paste your Firebase Web App configuration below.'}
         </div>
+        <div class="setup-status status-error" id="setup-error-banner" style="${errorMsg ? 'display:block; margin-bottom:15px;' : 'display:none; margin-bottom:15px;'}">
+          ${errorMsg}
+        </div>
         
         <form id="firebase-config-form" style="${readyToSeed ? 'display:none;' : ''}">
           <div class="form-group">
             <label>API Key</label>
-            <input type="text" id="apiKey" required placeholder="AIzaSy...">
+            <input type="text" id="apiKey" required value="${config.apiKey && !config.apiKey.includes('...') ? config.apiKey : ''}" placeholder="AIzaSy...">
           </div>
           <div class="form-group">
             <label>Auth Domain</label>
-            <input type="text" id="authDomain" required placeholder="your-project.firebaseapp.com">
+            <input type="text" id="authDomain" required value="${config.authDomain && !config.authDomain.includes('...') ? config.authDomain : ''}" placeholder="your-project.firebaseapp.com">
           </div>
           <div class="form-group">
             <label>Project ID</label>
-            <input type="text" id="projectId" required placeholder="your-project">
+            <input type="text" id="projectId" required value="${config.projectId && !config.projectId.includes('...') ? config.projectId : ''}" placeholder="your-project">
           </div>
           <div class="form-group">
             <label>Storage Bucket</label>
-            <input type="text" id="storageBucket" required placeholder="your-project.appspot.com">
+            <input type="text" id="storageBucket" required value="${config.storageBucket && !config.storageBucket.includes('...') ? config.storageBucket : ''}" placeholder="your-project.appspot.com">
           </div>
           <div class="form-group">
             <label>Messaging Sender ID</label>
-            <input type="text" id="messagingSenderId" required placeholder="1234567890">
+            <input type="text" id="messagingSenderId" required value="${config.messagingSenderId && !config.messagingSenderId.includes('...') ? config.messagingSenderId : ''}" placeholder="1234567890">
           </div>
           <div class="form-group">
             <label>App ID</label>
-            <input type="text" id="appId" required placeholder="1:12345:web:abcd">
+            <input type="text" id="appId" required value="${config.appId && !config.appId.includes('...') ? config.appId : ''}" placeholder="1:12345:web:abcd">
           </div>
           <button type="submit" class="setup-btn" id="submit-config-btn">Connect & Save</button>
         </form>
