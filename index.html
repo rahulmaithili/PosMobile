@@ -8,9 +8,9 @@
   <title>Admin & User Dashboard</title>
 
   <!--
-  Developed by Mohammad Rameez Imdad (Rameez Scripts)
-  WhatsApp: https://wa.me/923224083545 (For Custom Projects)
-  YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+  Developed by Mr.Rahul Scripts (Rahul Scripts)
+  WhatsApp: https://wa.me/
+  YouTube: https://youtube.com/
   -->
 
   <!-- CDN Dependencies -->
@@ -2378,7 +2378,7 @@
         '<div class="hr"></div><table>'+rows+'</table><div class="hr"></div><table>'+totals+'</table>' +
         (tender ? '<div class="hr"></div>'+tender : '') +
         '<div class="sm" style="margin-top:3px">Method: '+esc((sale.payment_method||'').replace('_',' '))+' · '+esc(sale.payment_status||'')+'</div>' +
-        '<div class="hr"></div><div class="ctr sm">'+esc(c.footer)+(c.website?'<br>'+esc(c.website):'')+'<br>Powered by Rameez Scripts</div>';
+        '<div class="hr"></div><div class="ctr sm">'+esc(c.footer)+(c.website?'<br>'+esc(c.website):'')+'<br>Powered by Rahul Scripts</div>';
     }
     // (b) A4 tax invoice — net_amount taxable base + vat_amount (discount-apportioned)
     function invoiceHTML(sale){
@@ -2865,6 +2865,13 @@
               </button>
               {error && <div className="error">{error}</div>}
             </form>
+            <div style={{marginTop:'25px', paddingTop:'15px', borderTop:'1px solid rgba(255,255,255,0.08)', textAlign:'center', fontSize:'12px', color:'rgba(255,255,255,0.45)'}}>
+              <div>Developed by <span style={{color:'#fff', fontWeight:'500'}}>Mr.Rahul Scripts (Rahul Scripts)</span></div>
+              <div style={{marginTop:'8px', display:'flex', justifyContent:'center', gap:'15px'}}>
+                <a href="https://wa.me/" target="_blank" rel="noopener noreferrer" style={{color:'#25D366', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'4px'}}><i className="fab fa-whatsapp"></i> WhatsApp</a>
+                <a href="https://youtube.com/" target="_blank" rel="noopener noreferrer" style={{color:'#FF0000', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'4px'}}><i className="fab fa-youtube"></i> YouTube</a>
+              </div>
+            </div>
           </div>
         </div>
       );
@@ -2939,6 +2946,16 @@
                 <span>Logout</span>
               </button>
             </div>
+
+            {!collapsed && (
+              <div style={{padding:'15px', borderTop:'1px solid rgba(255,255,255,0.05)', textAlign:'center', fontSize:'11px', color:'rgba(255,255,255,0.4)', marginTop:'auto'}}>
+                <div>Developed by <span style={{color:'#fff', fontWeight:'500'}}>Mr.Rahul Scripts</span></div>
+                <div style={{marginTop:'6px', display:'flex', justifyContent:'center', gap:'12px'}}>
+                  <a href="https://wa.me/" target="_blank" rel="noopener noreferrer" style={{color:'#25D366', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'3px'}}><i className="fab fa-whatsapp"></i> WhatsApp</a>
+                  <a href="https://youtube.com/" target="_blank" rel="noopener noreferrer" style={{color:'#FF0000', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'3px'}}><i className="fab fa-youtube"></i> YouTube</a>
+                </div>
+              </div>
+            )}
           </div>
         </>
       );
@@ -5565,7 +5582,7 @@
 
           <div className="about-section">
             <h3><i className="fas fa-code"></i> Built By</h3>
-            <p className="lead" style={{margin:0}}>Developed by Mohammad Rameez Imdad (Rameez Scripts) · <a href="https://wa.me/923224083545" target="_blank" rel="noreferrer">WhatsApp</a> · <a href="https://www.youtube.com/@rameezimdad" target="_blank" rel="noreferrer">YouTube</a></p>
+            <p className="lead" style={{margin:0}}>Developed by Mr.Rahul Scripts (Rahul Scripts) · <a href="https://wa.me/" target="_blank" rel="noreferrer">WhatsApp</a> · <a href="https://youtube.com/" target="_blank" rel="noreferrer">YouTube</a></p>
           </div>
         </div>
       );

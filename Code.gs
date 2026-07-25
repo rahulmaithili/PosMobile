@@ -1,7 +1,7 @@
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://wa.me/923224083545 (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+ * Developed by Mr.Rahul Scripts (Rahul Scripts)
+ * WhatsApp: https://wa.me/
+ * YouTube: https://youtube.com/
  */
 
 // ============== Sheets ==============
@@ -201,7 +201,7 @@ function logActivity(userId, actionType, refTable, refId, desc){
 // ============== Settings ==============
 // single registry — drives seed + read-merge + save-whitelist. Add ANY new key here.
 var SETTINGS_DEFAULTS = {
-  shop_name:'Rameez Phone Hub', shop_tagline:'Sales · Repairs · Accessories',
+  shop_name:'Rahul Phone Hub', shop_tagline:'Sales · Repairs · Accessories',
   shop_address:'123 Market Street, Downtown', shop_city:'', shop_country:'',
   shop_phone:'+1 555 0100', shop_email:'hello@phoneshop.demo', shop_website:'', tax_id:'', shop_logo: DEFAULT_LOGO,
   currency:'€', currency_code:'EUR', currency_position:'before', currency_decimals:'2',

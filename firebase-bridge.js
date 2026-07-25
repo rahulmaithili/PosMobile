@@ -9,7 +9,7 @@
   // 1. Static Configuration & Constants
   // ==========================================
   const SETTINGS_DEFAULTS = {
-    shop_name:'Rameez Phone Hub', shop_tagline:'Sales · Repairs · Accessories',
+    shop_name:'Rahul Phone Hub', shop_tagline:'Sales · Repairs · Accessories',
     shop_address:'123 Market Street, Downtown', shop_city:'', shop_country:'',
     shop_phone:'+1 555 0100', shop_email:'hello@phoneshop.demo', shop_website:'', tax_id:'', shop_logo: 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg',
     currency:'₹', currency_code:'INR', currency_position:'before', currency_decimals:'2',
