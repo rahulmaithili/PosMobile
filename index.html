@@ -4177,11 +4177,39 @@
     }
 
     // ============== My Account (self profile — simple form card) ==============
-    function AccountView({ userId, userName, email, role }) {
+    function AccountView({ userId, userName, email, role, profileImage, onSettingsUpdate }) {
       const [email2, setEmail2] = useState(email || '');
       const [curPwd, setCurPwd] = useState('');
       const [newPwd, setNewPwd] = useState('');
       const [busy, setBusy] = useState('');
+      const [profileImg, setProfileImg] = useState(profileImage || '');
+
+      useEffect(() => {
+        setProfileImg(profileImage || '');
+      }, [profileImage]);
+
+      const handleFile = async (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        setBusy('Uploading…');
+        try {
+          const base64 = await compressImage(file, 200, 200, 0.7);
+          const r = await gsRun('uploadProfileImage', base64, file.name, userId);
+          if (r.success) {
+            await gsRun('updateUserSettings', userId, { profileImage: r.fileUrl });
+            setBusy(''); setProfileImg(r.fileUrl);
+            Swal.fire({ icon:'success', title:'Profile photo updated', timer:1100, showConfirmButton:false });
+            onSettingsUpdate && onSettingsUpdate();
+          } else {
+            setBusy('');
+            Swal.fire({ icon:'error', title:'Upload failed', text:r.message });
+          }
+        } catch (err) {
+          setBusy('');
+          console.error(err);
+          Swal.fire({ icon:'error', title:'Upload error', text: err.message || 'Failed to save photo.' });
+        }
+        e.target.value = '';
+      };
 
       const save = (e) => {
         e.preventDefault();
@@ -4204,6 +4232,16 @@
           <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px', flexWrap:'wrap'}}>
             <span style={{fontWeight:600}}><i className="fas fa-user"></i> {userName}</span>
             <span className="status-badge">{role}</span>
+          </div>
+          <div className="settings-logo-row" style={{marginBottom:'20px', display:'flex', alignItems:'center', gap:'15px', padding:'15px', background:'rgba(255,255,255,0.03)', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.05)'}}>
+            {profileImg
+              ? <img className="settings-logo-preview" style={{width:'80px', height:'80px', borderRadius:'50%', objectFit:'cover', border:'2px solid var(--navy-primary)'}} src={profileImg} alt="Profile" />
+              : <span className="settings-logo-preview" style={{width:'80px', height:'80px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,0.05)', color:'#789', fontSize:'34px', border:'2px dashed rgba(255,255,255,0.1)'}}><i className="fas fa-user"></i></span>}
+            <div className="form-group" style={{margin:0, flex:'1 1 240px'}}>
+              <label style={{marginBottom:'6px', display:'block'}}><i className="fas fa-upload"></i> Upload profile photo</label>
+              <input type="file" className="file-input" accept="image/*" onChange={handleFile} />
+              <small style={{color:'#778', display:'block', marginTop:'4px'}}>Personal avatar shown on header and sidebar.</small>
+            </div>
           </div>
           <form onSubmit={save}>
             <div className="form-grid">
@@ -6110,7 +6148,7 @@
     }
 
     // ============== Main Content Router ==============
-    function MainContent({ activeMenu, userId, userName, email, role, perms, canEditRbac, setActiveMenu, onSettingsUpdate }) {
+    function MainContent({ activeMenu, userId, userName, email, role, perms, canEditRbac, setActiveMenu, onSettingsUpdate, profileImage }) {
       const guard = (page, el) => can(perms, page, 'v') ? el : <NoAccessView />;
       switch (activeMenu) {
         case 'dashboard':   return guard('dashboard', <DashboardView userId={userId} userName={userName} role={role} perms={perms} setActiveMenu={setActiveMenu} />);
@@ -6130,7 +6168,7 @@
         case 'settings':    return guard('settings', <SettingsView userId={userId} role={role} perms={perms} onSettingsUpdate={onSettingsUpdate} />);
         case 'logs':        return guard('logs', <LogsView userId={userId} role={role} perms={perms} />);
         case 'permissions': return canEditRbac ? <PermissionsMatrixView userId={userId} /> : <NoAccessView />;
-        case 'account':     return <AccountView userId={userId} userName={userName} email={email} role={role} />;
+        case 'account':     return <AccountView userId={userId} userName={userName} email={email} role={role} profileImage={profileImage} onSettingsUpdate={onSettingsUpdate} />;
         case 'about':       return <AboutView role={role} />;
         default:            return <NoAccessView />;
       }
@@ -6217,6 +6255,7 @@
                 canEditRbac={canEditRbac}
                 setActiveMenu={setActiveMenu}
                 onSettingsUpdate={onSettingsUpdate}
+                profileImage={profileImage}
               />
             </div>
           </div>
