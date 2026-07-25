@@ -3647,7 +3647,20 @@
 
       const repairPartsCost = round2(repairs.reduce((a, r) => a + Number(r.parts_cost || 0), 0));
       const repairProfit = round2(repairIncome - repairPartsCost);
-      const netProfit = round2(salesGrossProfit + repairProfit - expensesTotal);
+
+      // Supplier Payments (actual cash paid to suppliers = real outflow expense)
+      const supplierPaymentsSnap = await db.collection('supplier_payments').get();
+      let supplierPaymentsTotal = 0;
+      supplierPaymentsSnap.forEach(d => {
+        const sp = d.data();
+        if (sp.deleted) return;
+        const date = (sp.payment_date || sp.created || '').slice(0, 10);
+        if (from && date < from) return;
+        if (to && date > to) return;
+        supplierPaymentsTotal = round2(supplierPaymentsTotal + Number(sp.amount || 0));
+      });
+
+      const netProfit = round2(salesGrossProfit + repairProfit - expensesTotal - supplierPaymentsTotal);
 
       return ok('', { data: {
         salesCount: sales.length, salesRevenue, salesVat, salesDiscount,
@@ -3662,8 +3675,147 @@
           delivered: repairs.filter(r => r.status === 'delivered').length
         },
         usedCount: used.length, usedSpend,
+        supplierPaymentsTotal,
         expensesTotal, expensesByCategory, netProfit
       } });
+    },
+
+    getRojnamcha: async (dateStr, token) => {
+      const uid = await gate(token, 'reports', 'v').catch(() => null) || await gate(token, 'cash_drawer', 'v').catch(() => null);
+      if (!uid) return err('Access denied');
+
+      const targetDate = dateStr;
+      
+      // 1. Fetch Sales
+      const salesSnap = await db.collection('sales').get();
+      const sales = [];
+      let totalSales = 0;
+      let totalDiscount = 0;
+      const salesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      salesSnap.forEach(d => {
+        const s = d.data();
+        if (s.deleted) return;
+        if (s.created.slice(0, 10) === targetDate) {
+          sales.push(s);
+          totalSales = round2(totalSales + Number(s.total || 0));
+          totalDiscount = round2(totalDiscount + Number(s.discount || 0));
+          const method = (s.payment_method || 'cash').toLowerCase();
+          salesByMethod[method] = round2((salesByMethod[method] || 0) + Number(s.total || 0));
+        }
+      });
+
+      // 2. Fetch Repairs
+      const repairsSnap = await db.collection('repairs').get();
+      const repairs = [];
+      let totalRepairs = 0;
+      const repairsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      repairsSnap.forEach(d => {
+        const r = d.data();
+        if (r.deleted) return;
+        const date = (r.updated || r.created).slice(0, 10);
+        if (date === targetDate) {
+          repairs.push(r);
+          totalRepairs = round2(totalRepairs + Number(r.paid_amount || 0));
+          const method = (r.payment_method || 'cash').toLowerCase();
+          repairsByMethod[method] = round2((repairsByMethod[method] || 0) + Number(r.paid_amount || 0));
+        }
+      });
+
+      // 3. Fetch Used Phones purchases (Outflow)
+      const usedSnap = await db.collection('used_phones').get();
+      let totalUsedSpend = 0;
+      const usedSpendByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      usedSnap.forEach(d => {
+        const u = d.data();
+        if (u.deleted) return;
+        if (u.created.slice(0, 10) === targetDate) {
+          totalUsedSpend = round2(totalUsedSpend + Number(u.purchase_price || 0));
+          const method = (u.payment_method || 'cash').toLowerCase();
+          usedSpendByMethod[method] = round2((usedSpendByMethod[method] || 0) + Number(u.purchase_price || 0));
+        }
+      });
+
+      // 4. Fetch Expenses (Outflow)
+      const expensesSnap = await db.collection('expenses').get();
+      let totalExpenses = 0;
+      const expensesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      expensesSnap.forEach(d => {
+        const e = d.data();
+        if (e.deleted) return;
+        if (e.created.slice(0, 10) === targetDate) {
+          totalExpenses = round2(totalExpenses + Number(e.amount || 0));
+          const method = (e.payment_method || 'cash').toLowerCase();
+          expensesByMethod[method] = round2((expensesByMethod[method] || 0) + Number(e.amount || 0));
+        }
+      });
+
+      // 5. Fetch Supplier Purchases (Outflow)
+      const purchasesSnap = await db.collection('supplier_purchases').get();
+      let totalSupplierPurchases = 0;
+      purchasesSnap.forEach(d => {
+        const p = d.data();
+        if (p.deleted) return;
+        if (p.bill_date === targetDate) {
+          totalSupplierPurchases = round2(totalSupplierPurchases + Number(p.total_amount || 0));
+        }
+      });
+
+      // 6. Fetch Supplier Payments (Outflow)
+      const supplierPaymentsSnap = await db.collection('supplier_payments').get();
+      let totalSupplierPayments = 0;
+      const supplierPaymentsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      supplierPaymentsSnap.forEach(d => {
+        const sp = d.data();
+        if (sp.deleted) return;
+        const date = (sp.payment_date || sp.created).slice(0, 10);
+        if (date === targetDate) {
+          totalSupplierPayments = round2(totalSupplierPayments + Number(sp.amount || 0));
+          const method = (sp.method || 'cash').toLowerCase();
+          supplierPaymentsByMethod[method] = round2((supplierPaymentsByMethod[method] || 0) + Number(sp.amount || 0));
+        }
+      });
+
+      // 7. Fetch Installment Payments (Inflow)
+      const installmentPaymentsSnap = await db.collection('installment_payments').get();
+      let totalInstallments = 0;
+      const installmentsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      installmentPaymentsSnap.forEach(d => {
+        const ip = d.data();
+        if (ip.deleted) return;
+        if (ip.created.slice(0, 10) === targetDate) {
+          totalInstallments = round2(totalInstallments + Number(ip.amount || 0));
+          const method = (ip.method || 'cash').toLowerCase();
+          installmentsByMethod[method] = round2((installmentsByMethod[method] || 0) + Number(ip.amount || 0));
+        }
+      });
+
+      // 8. Fetch Cash Drawer shifts for opening balance
+      const drawerSnap = await db.collection('cash_drawer_shifts').get();
+      let openingBalance = 0;
+      let closingBalance = 0;
+      let isTillOpen = false;
+      drawerSnap.forEach(d => {
+        const s = d.data();
+        if (s.opened_at.slice(0, 10) === targetDate) {
+          openingBalance = Number(s.opening_cash) || 0;
+          if (s.closed_at) {
+            closingBalance = Number(s.closed_cash) || 0;
+          } else {
+            isTillOpen = true;
+          }
+        }
+      });
+
+      return ok('', {
+        sales: { total: totalSales, discount: totalDiscount, breakdown: salesByMethod },
+        repairs: { total: totalRepairs, breakdown: repairsByMethod },
+        expenses: { total: totalExpenses, breakdown: expensesByMethod },
+        supplierPurchases: { total: totalSupplierPurchases },
+        supplierPayments: { total: totalSupplierPayments, breakdown: supplierPaymentsByMethod },
+        usedSpend: { total: totalUsedSpend, breakdown: usedSpendByMethod },
+        installments: { total: totalInstallments, breakdown: installmentsByMethod },
+        till: { opening: openingBalance, closing: closingBalance, isTillOpen }
+      });
     }
   };
 

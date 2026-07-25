@@ -2297,6 +2297,7 @@
       cash_drawer: { label:'Cash Drawer',         icon:'fa-sack-dollar',        group:'Finance' },
       installments:{ label:'Installments / EMI',  icon:'fa-hand-holding-dollar', group:'Finance' },
       reports:     { label:'Reports',             icon:'fa-chart-pie',          group:'Finance' },
+      rojnamcha:   { label:'Rojnamcha (Daily)',   icon:'fa-book',               group:'Finance' },
       settings:    { label:'Settings',            icon:'fa-gear',               group:'System' },
       logs:        { label:'Activity Logs',       icon:'fa-clock-rotate-left',  group:'System' },
       permissions: { label:'Roles & Permissions', icon:'fa-user-shield',        group:'System' },
@@ -2307,7 +2308,10 @@
     const ALWAYS_PAGES = ['account', 'about']; // every signed-in user
 
     // can(perms, page, perm)  perm = 'v'(default)|'a'|'e'|'d'
-    const can = (perms, page, perm) => !!(perms && perms[page] && perms[page][perm || 'v']);
+    const can = (perms, page, perm) => {
+      if (page === 'rojnamcha') return !!(perms && ((perms['reports'] && perms['reports'][perm || 'v']) || (perms['cash_drawer'] && perms['cash_drawer'][perm || 'v'])));
+      return !!(perms && perms[page] && perms[page][perm || 'v']);
+    };
 
     // ============== Shared helpers + components ==============
     const LOGO_URL = 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg';
@@ -2664,6 +2668,50 @@
           <\/script>
         </body>
         </html>
+      `;
+    }
+
+    function supplierPaymentReceiptHTML(p, purchase) {
+      const shop = window.SHOP || {};
+      const currency = shop.currency || '₹';
+      return `
+        <div style="font-family:monospace;font-size:12px;line-height:1.4;max-width:280px;margin:auto">
+          <div style="text-align:center;font-weight:bold;font-size:14px">${esc(shop.name || 'Mobile Shop')}</div>
+          <div style="text-align:center;font-size:10px">${esc(shop.address || '')}</div>
+          <div style="text-align:center;font-size:10px">Phone: ${esc(shop.phone || '')}</div>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <div style="text-align:center;font-weight:bold">SUPPLIER PAYMENT RECEIPT</div>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <div><b>Receipt ID:</b> #${p.id}</div>
+          <div><b>Date:</b> ${fmtDate(p.created || new Date())}</div>
+          <div><b>Supplier:</b> ${esc(purchase.supplier_name)}</div>
+          <div><b>Purchase Invoice:</b> #${esc(purchase.invoice_no || '—')}</div>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <table style="width:100%;font-size:12px">
+            <tr>
+              <td>Amount Paid:</td>
+              <td style="text-align:right;font-weight:bold">${currency}${Number(p.amount).toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td>Payment Method:</td>
+              <td style="text-align:right">${p.method.toUpperCase()}</td>
+            </tr>
+            <tr>
+              <td>Total Bill Amount:</td>
+              <td style="text-align:right">${currency}${Number(purchase.total_amount || 0).toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td>Total Paid:</td>
+              <td style="text-align:right">${currency}${Number(purchase.amount_paid || 0).toFixed(2)}</td>
+            </tr>
+            <tr style="font-weight:bold">
+              <td>Remaining Dues:</td>
+              <td style="text-align:right">${currency}${Number(purchase.due_amount || 0).toFixed(2)}</td>
+            </tr>
+          </table>
+          <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
+          <div style="text-align:center;font-size:10px">Payment Logged Successfully</div>
+        </div>
       `;
     }
 
@@ -3627,8 +3675,13 @@
       const [busy, setBusy] = useState('');
 
       const [activeTab, setActiveTab] = useState('list'); // 'list' or 'purchases'
-      const { data: purRes, mutate: mutatePurchases } = useSWR(activeTab === 'purchases' ? 'supplier_purchases:all' : null, () => gsRun('getSupplierPurchases', userId), { revalidateOnFocus:false });
+      const { data: purRes, mutate: mutatePurchases } = useSWR('supplier_purchases:all', () => gsRun('getSupplierPurchases', userId), { revalidateOnFocus:false });
       const purchases = purRes && purRes.success ? purRes.data : [];
+
+      const supplierDuesMap = {};
+      purchases.forEach(p => {
+        supplierDuesMap[p.supplier_id] = (supplierDuesMap[p.supplier_id] || 0) + (Number(p.due_amount) || 0);
+      });
 
       const [showAddPurchase, setShowAddPurchase] = useState(false);
       const [payPurchase, setPayPurchase] = useState(null);
@@ -3645,6 +3698,10 @@
         { data:'contact_person', title:'Contact', render:(d) => esc(d) || '—' },
         { data:'payment_terms', title:'Terms', render:(d) => esc(d) || '—' },
         { data:'opening_balance', title:'Op. Bal', render:(d) => money(d) },
+        { data:null, title:'Outstanding Dues', render:(d, t, r) => {
+            const dues = supplierDuesMap[r.id] || 0;
+            return dues > 0 ? `<b style="color:#c5221f">${money(dues)}</b>` : `<span style="color:#2e7d32">${money(0)}</span>`;
+        }},
         { data:'status', title:'Status', render:(d) => statusPill(d) },
         { data:null, title:'Actions', orderable:false, render:() =>
           ('<button class="action-icon" data-action="view" title="View"><i class="fas fa-eye"></i></button>' +
@@ -3778,8 +3835,8 @@
           <LoadingPopup text={busy} />
           
           <div className="tab-navigation" style={{display:'flex', gap:'10px', marginBottom:'15px', borderBottom:'1px solid rgba(255,255,255,0.08)', paddingBottom:'8px'}}>
-            <button className={`btn ${activeTab === 'list' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab('list')} style={{borderRadius:'6px', display:'flex', alignItems:'center', gap:'6px'}}><i className="fas fa-truck-field"></i> Suppliers List</button>
-            <button className={`btn ${activeTab === 'purchases' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab('purchases')} style={{borderRadius:'6px', display:'flex', alignItems:'center', gap:'6px'}}><i className="fas fa-file-invoice-dollar"></i> Purchases & Bills Dues</button>
+            <button className={`btn ${activeTab === 'list' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setActiveTab('list'); setTimeout(() => { try { if ($.fn.DataTable.isDataTable('#suppliersTable')) { $('#suppliersTable').DataTable().columns.adjust(); } } catch(e){} }, 80); }} style={{borderRadius:'6px', display:'flex', alignItems:'center', gap:'6px'}}><i className="fas fa-truck-field"></i> Suppliers List</button>
+            <button className={`btn ${activeTab === 'purchases' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setActiveTab('purchases'); setTimeout(() => { try { if ($.fn.DataTable.isDataTable('#supplierPurchasesTable')) { $('#supplierPurchasesTable').DataTable().columns.adjust(); } } catch(e){} }, 80); }} style={{borderRadius:'6px', display:'flex', alignItems:'center', gap:'6px'}}><i className="fas fa-file-invoice-dollar"></i> Purchases & Bills Dues</button>
           </div>
 
           <div style={{display: activeTab === 'list' ? 'block' : 'none'}}>
@@ -4195,6 +4252,7 @@
                         </td>
                         <td>
                           <div style={{display:'flex', gap:'6px'}}>
+                            <button className="action-icon" style={{color:'#0074D9'}} title="Print Payment Receipt" onClick={() => printDoc(supplierPaymentReceiptHTML(p, purchase), 'Supplier-Payment-' + p.id, '80mm')}><i className="fas fa-print"></i></button>
                             <button className="action-icon" style={{color:'var(--navy-accent)'}} title="Edit Payment" onClick={() => onEditPayment(p)}><i className="fas fa-edit"></i></button>
                             <button className="action-icon" style={{color:'#b91c1c'}} title="Delete Payment" onClick={() => onDeletePayment(p.id)}><i className="fas fa-trash"></i></button>
                           </div>
@@ -5996,6 +6054,7 @@
                 <SmallBox value={money(d.salesGrossProfit)} label="Sales Gross Profit" icon="fa-sack-dollar" color="bg-success" />
                 <SmallBox value={money(d.repairProfit)} label="Repair Profit" icon="fa-screwdriver-wrench" color="bg-info" />
                 <SmallBox value={money(d.expensesTotal)} label="Expenses" icon="fa-file-invoice-dollar" color="bg-warning" />
+                <SmallBox value={money(d.supplierPaymentsTotal || 0)} label="Supplier Payments" icon="fa-truck-field" color="bg-navy" />
               </div>
 
               <LteCard title="Profit & Loss" icon="fa-scale-balanced">
@@ -6005,8 +6064,9 @@
                     <tbody>
                       <tr><td>Sales Gross Profit <span style={{color:'#789'}}>(net of {money(d.refundsTotal || 0)} returns)</span></td><td style={{textAlign:'right'}}>{money(d.salesGrossProfit)}</td></tr>
                       <tr><td>(+) Repair Profit <span style={{color:'#789'}}>(income − parts {money(d.repairPartsCost || 0)})</span></td><td style={{textAlign:'right'}}>{money(d.repairProfit)}</td></tr>
-                      <tr><td>(−) Expenses</td><td style={{textAlign:'right'}}>{money(d.expensesTotal)}</td></tr>
+                      <tr><td>(−) General Expenses</td><td style={{textAlign:'right'}}>{money(d.expensesTotal)}</td></tr>
                       {Object.keys(d.expensesByCategory || {}).map(c => <tr key={c}><td style={{paddingLeft:'24px', color:'#789'}}>· {c}</td><td style={{textAlign:'right', color:'#789'}}>{money(d.expensesByCategory[c])}</td></tr>)}
+                      <tr><td>(−) Supplier Payments (Purchase Outflow) <span style={{color:'#789', fontSize:'12px'}}>cash paid to suppliers</span></td><td style={{textAlign:'right', color:'#b91c1c'}}>{money(d.supplierPaymentsTotal || 0)}</td></tr>
                       <tr style={{fontWeight:700}}><td>(=) Net Profit</td><td style={{textAlign:'right', color: d.netProfit >= 0 ? '#2e7d32' : '#b91c1c'}}>{money(d.netProfit)}</td></tr>
                     </tbody>
                   </table>
@@ -6044,6 +6104,192 @@
                   <InfoBox value={(d.repairsByStatus && d.repairsByStatus.delivered) || 0} label="Delivered" icon="fa-truck" color="bg-success" />
                 </div>
               </LteCard>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function RojnamchaView({ userId, role, perms }) {
+      const [date, setDate] = useState(todayStr());
+      const { data: res, error, mutate } = useSWR(date ? `rojnamcha:${date}` : null, () => gsRun('getRojnamcha', date), { revalidateOnFocus: false });
+      const d = res && res.success ? res.data : null;
+      
+      const shop = window.SHOP || {};
+      const currency = shop.currency || '₹';
+
+      if (error) return <div style={{padding:'20px', color:'red'}}>Error loading daily ledger</div>;
+
+      const printRojnamcha = () => {
+        if (!d) return;
+        const printHtml = `
+          <html>
+          <head>
+            <title>Rojnamcha Ledger — ${date}</title>
+            <style>
+              body { font-family: 'Courier New', Courier, monospace; color: #000; padding: 20px; line-height: 1.4; font-size: 14px; }
+              .ctr { text-align: center; }
+              .bold { font-weight: bold; }
+              .title { font-size: 20px; font-weight: bold; margin-bottom: 5px; }
+              .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
+              table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+              td { padding: 4px 0; font-size: 14px; }
+              .right { text-align: right; }
+              .indent { padding-left: 20px; color: #444; }
+              .total-row { font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; }
+            </style>
+          </head>
+          <body>
+            <div class="ctr title">${esc(shop.name || 'Mobile POS')}</div>
+            <div class="ctr">DAILY ROJNAMCHA / LEDGER</div>
+            <div class="ctr bold">Date: ${fmtDate(date)}</div>
+            <div class="divider"></div>
+            
+            <table>
+              <tr><td>Opening Cash (Drawer Till):</td><td class="right bold">${currency}${Number(d.till.opening).toFixed(2)}</td></tr>
+            </table>
+
+            <div class="bold" style="margin-top:15px; text-decoration: underline;">INFLOWS (KAMAAI / RECEIPTS)</div>
+            <table>
+              <tr><td>POS Sales:</td><td class="right">${currency}${Number(d.sales.total).toFixed(2)}</td></tr>
+              <tr><td class="indent">· Cash:</td><td class="right">${currency}${Number(d.sales.breakdown.cash || 0).toFixed(2)}</td></tr>
+              <tr><td class="indent">· Card:</td><td class="right">${currency}${Number(d.sales.breakdown.card || 0).toFixed(2)}</td></tr>
+              <tr><td class="indent">· GPay:</td><td class="right">${currency}${Number(d.sales.breakdown.gpay || 0).toFixed(2)}</td></tr>
+              <tr><td class="indent">· PhonePe:</td><td class="right">${currency}${Number(d.sales.breakdown.phonepe || 0).toFixed(2)}</td></tr>
+              <tr><td class="indent">· Bank Transfer:</td><td class="right">${currency}${Number(d.sales.breakdown.bank_transfer || 0).toFixed(2)}</td></tr>
+              
+              <tr><td style="padding-top:8px">Repairs Income:</td><td class="right" style="padding-top:8px">${currency}${Number(d.repairs.total).toFixed(2)}</td></tr>
+              <tr><td class="indent">· Cash:</td><td class="right">${currency}${Number(d.repairs.breakdown.cash || 0).toFixed(2)}</td></tr>
+              <tr><td class="indent">· GPay:</td><td class="right">${currency}${Number(d.repairs.breakdown.gpay || 0).toFixed(2)}</td></tr>
+              <tr><td class="indent">· PhonePe:</td><td class="right">${currency}${Number(d.repairs.breakdown.phonepe || 0).toFixed(2)}</td></tr>
+              
+              <tr><td style="padding-top:8px">Customer EMI/Dues Installments:</td><td class="right" style="padding-top:8px">${currency}${Number(d.installments.total).toFixed(2)}</td></tr>
+              
+              <tr class="total-row">
+                <td style="padding:6px 0">TOTAL INFLOWS:</td>
+                <td class="right" style="padding:6px 0">${currency}${Number(d.sales.total + d.repairs.total + d.installments.total).toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <div class="bold" style="margin-top:20px; text-decoration: underline;">OUTFLOWS (KHARCHE / PAYMENTS)</div>
+            <table>
+              <tr><td>Supplier Purchases (PO Paid):</td><td class="right">${currency}${Number(d.supplierPayments.total).toFixed(2)}</td></tr>
+              <tr><td class="indent">· Cash:</td><td class="right">${currency}${Number(d.supplierPayments.breakdown.cash || 0).toFixed(2)}</td></tr>
+              <tr><td class="indent">· GPay/PhonePe:</td><td class="right">${currency}${Number((d.supplierPayments.breakdown.gpay || 0) + (d.supplierPayments.breakdown.phonepe || 0)).toFixed(2)}</td></tr>
+              <tr><td class="indent">· Bank Transfer:</td><td class="right">${currency}${Number(d.supplierPayments.breakdown.bank_transfer || 0).toFixed(2)}</td></tr>
+              
+              <tr><td style="padding-top:8px">General Expenses:</td><td class="right" style="padding-top:8px">${currency}${Number(d.expenses.total).toFixed(2)}</td></tr>
+              <tr><td style="padding-top:8px">Used Phone Buy Spend:</td><td class="right" style="padding-top:8px">${currency}${Number(d.usedSpend.total).toFixed(2)}</td></tr>
+              
+              <tr class="total-row">
+                <td style="padding:6px 0">TOTAL OUTFLOWS:</td>
+                <td class="right" style="padding:6px 0">${currency}${Number(d.supplierPayments.total + d.expenses.total + d.usedSpend.total).toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <div class="divider"></div>
+            
+            <table>
+              <tr><td>Opening Drawer Cash:</td><td class="right">${currency}${Number(d.till.opening).toFixed(2)}</td></tr>
+              <tr><td>(+) Today's Cash Inflow:</td><td class="right">${currency}${Number((d.sales.breakdown.cash || 0) + (d.repairs.breakdown.cash || 0) + (d.installments.breakdown.cash || d.installments.total)).toFixed(2)}</td></tr>
+              <tr><td>(−) Today's Cash Outflow:</td><td class="right">${currency}${Number((d.supplierPayments.breakdown.cash || 0) + (d.expenses.breakdown.cash || d.expenses.total) + (d.usedSpend.breakdown.cash || d.usedSpend.total)).toFixed(2)}</td></tr>
+              <tr class="total-row" style="font-size:16px">
+                <td>CLOSING EXPECTED CASH:</td>
+                <td class="right">${currency}${Number(d.till.opening + ((d.sales.breakdown.cash || 0) + (d.repairs.breakdown.cash || 0) + (d.installments.breakdown.cash || d.installments.total)) - ((d.supplierPayments.breakdown.cash || 0) + (d.expenses.breakdown.cash || d.expenses.total) + (d.usedSpend.breakdown.cash || d.usedSpend.total))).toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <table style="margin-top:10px">
+              <tr><td>Discounts Given Today:</td><td class="right bold" style="color:var(--danger)">${currency}${Number(d.sales.discount).toFixed(2)}</td></tr>
+            </table>
+
+            <div class="divider" style="margin-top:30px"></div>
+            <div class="ctr" style="font-size:11px;color:#666">End of Daily Ledger</div>
+          </body>
+          </html>
+        `;
+        printDoc(printHtml, 'Rojnamcha-' + date, '80mm');
+      };
+
+      return (
+        <div className="data-section">
+          <div className="section-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px', flexWrap:'wrap', gap:'12px'}}>
+            <h2 style={{display:'flex', alignItems:'center', gap:'8px', color:'var(--navy-primary)', margin:0}}><i className="fas fa-book"></i> Rojnamcha (Daily Ledger)</h2>
+            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+              <div className="form-group" style={{margin:0}}><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+              {d && <button className="btn btn-secondary" onClick={printRojnamcha} style={{padding:'8px 14px', borderRadius:'6px'}}><i className="fas fa-print"></i> Print Rojnamcha</button>}
+            </div>
+          </div>
+
+          {!d ? (
+            <TableSkeleton rows={8} columns={5} />
+          ) : (
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
+              {/* Inflows Card */}
+              <div className="settings-card" style={{padding:'20px'}}>
+                <h3 style={{color:'#2e7d32', borderBottom:'2px solid rgba(46, 125, 50, 0.1)', paddingBottom:'8px', display:'flex', justifyContent:'space-between'}}>
+                  <span><i className="fas fa-arrow-trend-up"></i> Today's Inflows (Receipts)</span>
+                  <span>{money(d.sales.total + d.repairs.total + d.installments.total)}</span>
+                </h3>
+                <div style={{marginTop:'12px'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0'}}><span>POS Sales Revenue</span><span>{money(d.sales.total)}</span></div>
+                  <div style={{paddingLeft:'15px', fontSize:'13px', color:'rgba(255,255,255,0.6)'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Sales</span><span>{money(d.sales.breakdown.cash || 0)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>GPay Sales</span><span>{money(d.sales.breakdown.gpay || 0)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>PhonePe Sales</span><span>{money(d.sales.breakdown.phonepe || 0)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Card / Bank</span><span>{money((d.sales.breakdown.card || 0) + (d.sales.breakdown.bank_transfer || 0))}</span></div>
+                  </div>
+
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Repairs Income</span><span>{money(d.repairs.total)}</span></div>
+                  <div style={{paddingLeft:'15px', fontSize:'13px', color:'rgba(255,255,255,0.6)'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Repairs</span><span>{money(d.repairs.breakdown.cash || 0)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>GPay Repairs</span><span>{money(d.repairs.breakdown.gpay || 0)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>PhonePe Repairs</span><span>{money(d.repairs.breakdown.phonepe || 0)}</span></div>
+                  </div>
+
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Customer EMI / Dues Payments</span><span>{money(d.installments.total)}</span></div>
+                </div>
+              </div>
+
+              {/* Outflows Card */}
+              <div className="settings-card" style={{padding:'20px'}}>
+                <h3 style={{color:'#c5221f', borderBottom:'2px solid rgba(197, 34, 31, 0.1)', paddingBottom:'8px', display:'flex', justifyContent:'space-between'}}>
+                  <span><i className="fas fa-arrow-trend-down"></i> Today's Outflows (Payments)</span>
+                  <span>{money(d.supplierPayments.total + d.expenses.total + d.usedSpend.total)}</span>
+                </h3>
+                <div style={{marginTop:'12px'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0'}}><span>Supplier Dues & PO Paid</span><span>{money(d.supplierPayments.total)}</span></div>
+                  <div style={{paddingLeft:'15px', fontSize:'13px', color:'rgba(255,255,255,0.6)'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Paid</span><span>{money(d.supplierPayments.breakdown.cash || 0)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>UPI (GPay/PhonePe) Paid</span><span>{money((d.supplierPayments.breakdown.gpay || 0) + (d.supplierPayments.breakdown.phonepe || 0))}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Bank Transfer Paid</span><span>{money(d.supplierPayments.breakdown.bank_transfer || 0)}</span></div>
+                  </div>
+
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>General Shop Expenses</span><span>{money(d.expenses.total)}</span></div>
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Used Phones Spend</span><span>{money(d.usedSpend.total)}</span></div>
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px', color:'var(--warning)'}}><span>Total Supplier Purchases (PO Total Value)</span><span>{money(d.supplierPurchases.total)}</span></div>
+                </div>
+              </div>
+
+              {/* Day Reconciliation Card */}
+              <div className="settings-card" style={{gridColumn:'1 / -1', padding:'20px'}}>
+                <h3 style={{color:'var(--navy-accent)', borderBottom:'2px solid rgba(0,0,0,0.1)', paddingBottom:'8px'}}><i className="fas fa-calculator"></i> Day Reconciliation (Daily Accounts Closing)</h3>
+                
+                <div className="ins-summary" style={{gridTemplateColumns:'repeat(4, 1fr)', gap:'10px', marginTop:'14px'}}>
+                  <div className="ins-card"><span>Opening Drawer Balance</span><b>{money(d.till.opening)}</b></div>
+                  <div className="ins-card"><span>Today's Receipts (Inflow)</span><b style={{color:'#2e7d32'}}>+{money(d.sales.total + d.repairs.total + d.installments.total)}</b></div>
+                  <div className="ins-card"><span>Today's Outflows</span><b style={{color:'#c5221f'}}>-{money(d.supplierPayments.total + d.expenses.total + d.usedSpend.total)}</b></div>
+                  <div className="ins-card" style={{background:'rgba(255,255,255,0.06)'}}><span>Expected Cash / Closing Bal</span><b style={{color:'var(--navy-accent)'}}>{money(d.till.opening + (d.sales.total + d.repairs.total + d.installments.total) - (d.supplierPayments.total + d.expenses.total + d.usedSpend.total))}</b></div>
+                </div>
+
+                <div style={{marginTop:'14px', padding:'10px', background:'rgba(255,255,255,0.02)', borderRadius:'6px', border:'1px dashed rgba(255,255,255,0.08)'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'600'}}>
+                    <span>Total Discounts Given Today:</span>
+                    <span style={{color:'var(--danger)'}}>{money(d.sales.discount)}</span>
+                  </div>
+                  <small style={{color:'rgba(255,255,255,0.5)', display:'block', marginTop:'4px'}}>Note: Discounts reduce your overall POS Sales revenue. The figures above are net POS Sales after discounts.</small>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -7180,6 +7426,7 @@
         case 'cash_drawer': return guard('cash_drawer', <CashDrawerView userId={userId} role={role} perms={perms} />);
         case 'installments':return guard('installments', <InstallmentsView userId={userId} role={role} perms={perms} />);
         case 'reports':     return guard('reports', <ReportsView userId={userId} role={role} perms={perms} />);
+        case 'rojnamcha':   return guard('rojnamcha', <RojnamchaView userId={userId} role={role} perms={perms} />);
         case 'settings':    return guard('settings', <SettingsView userId={userId} role={role} perms={perms} onSettingsUpdate={onSettingsUpdate} />);
         case 'logs':        return guard('logs', <LogsView userId={userId} role={role} perms={perms} />);
         case 'permissions': return canEditRbac ? <PermissionsMatrixView userId={userId} /> : <NoAccessView />;
