@@ -4929,16 +4929,42 @@
       const [productId, setProductId] = useState('');
       const [qty, setQty] = useState('');
       const [note, setNote] = useState('');
+      const [supplierId, setSupplierId] = useState('');
+      const [invoiceNo, setInvoiceNo] = useState('');
+      const [proof, setProof] = useState('');
+      const [uploading, setUploading] = useState(false);
       const [busy, setBusy] = useState('');
+
+      const { data: supRes } = useSWR('suppliers:all', () => gsRun('getSuppliers', userId), { revalidateOnFocus:false });
+      const suppliers = supRes && supRes.success ? supRes.data : [];
+      const supplierOpts = [{ value:'', label:'No Supplier (Direct Adjustment)' }].concat(
+        suppliers.map(s => ({ value:s.id, label:s.name + (s.company ? ' (' + s.company + ')' : '') }))
+      );
+
       const opts = products.map(p => ({ value:p.id, label:`${p.name} (${p.stock_qty} in stock)` }));
       const cur = products.find(p => String(p.id) === String(productId));
+      const q = parseInt(qty) || 0;
+      const isPurchase = q > 0;
+
+      const handleProofUpload = async (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        setUploading(true);
+        try {
+          const compressed = await compressImage(file, 450, 450, 0.7);
+          setProof(compressed);
+        } catch (err) {
+          console.error("Proof compression failed:", err);
+        } finally {
+          setUploading(false);
+        }
+      };
+
       const submit = (e) => {
         e.preventDefault();
-        const q = parseInt(qty);
         if (!productId) { Swal.fire({ icon:'warning', title:'Pick a product' }); return; }
         if (!q) { Swal.fire({ icon:'warning', title:'Enter a non-zero qty change' }); return; }
         setBusy('Adjusting…');
-        gsRun('adjustStock', Number(productId), q, note, userId).then(rr => {
+        gsRun('adjustStock', Number(productId), q, note, supplierId || null, invoiceNo, proof, userId).then(rr => {
           setBusy('');
           if (rr.success) { Swal.fire({ icon:'success', title:'Stock adjusted', timer:1100, showConfirmButton:false }); onDone(); onClose(); }
           else Swal.fire({ icon:'error', title:'Error', text:rr.message });
@@ -4947,15 +4973,34 @@
       return (
         <div className="modal-overlay" onClick={onClose}>
           <LoadingPopup text={busy} />
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'460px'}}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'480px'}}>
             <div className="modal-header"><h3><i className="fas fa-arrows-up-down"></i> New Stock Adjustment</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
             <div className="modal-body">
               <form onSubmit={submit}>
                 <div className="form-group"><label><i className="fas fa-box"></i> Product *</label><SearchableDropdown options={opts} value={productId} onChange={setProductId} placeholder="Select product" /></div>
                 {cur && <div className="form-group" style={{margin:'-4px 0 10px'}}><span style={{fontSize:'13px', color:'#667'}}>Current stock: <b>{cur.stock_qty}</b></span></div>}
                 <div className="form-group"><label><i className="fas fa-arrow-up-1-9"></i> Qty Change *</label><input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="e.g. 5 to add, -2 to remove" /></div>
+                
+                {isPurchase && (
+                  <>
+                    <div className="form-group"><label><i className="fas fa-truck-field"></i> Supplier</label><SearchableDropdown options={supplierOpts} value={supplierId} onChange={setSupplierId} placeholder="Select Supplier" /></div>
+                    <div className="form-group"><label><i className="fas fa-file-invoice"></i> Supplier Bill / Invoice No.</label><input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="Invoice #" /></div>
+                    <div className="form-group">
+                      <label><i className="fas fa-camera"></i> Upload Bill / Invoice Proof</label>
+                      <input type="file" className="file-input" accept="image/*" onChange={handleProofUpload} />
+                      {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Compressing bill...</small>}
+                      {proof && (
+                        <div style={{marginTop:'8px', textAlign:'center'}}>
+                          <img src={proof} alt="Bill proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProof('')} style={{display:'block', margin:'4px auto 0', padding:'2px 8px', fontSize:'11px'}}><i className="fas fa-trash"></i> Remove Bill</button>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 <div className="form-group"><label><i className="fas fa-note-sticky"></i> Note</label><input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason (optional)" /></div>
-                <div className="form-actions"><button type="submit" className="btn btn-primary"><i className="fas fa-check"></i> Apply</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
+                <div className="form-actions" style={{marginTop:'15px'}}><button type="submit" className="btn btn-primary" disabled={uploading}><i className="fas fa-check"></i> Apply</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
               </form>
             </div>
           </div>
@@ -4981,10 +5026,26 @@
         { data:'qty_change', title:'Qty', render:(q) => Number(q) > 0
             ? `<span style="color:#2e7d32;font-weight:700">+${q}</span>`
             : `<span style="color:#c5221f;font-weight:700">${q}</span>` },
+        { data:'supplier_name', title:'Supplier', render:(d) => esc(d) || '—' },
+        { data:'invoice_no', title:'Invoice / Bill', render:(d) => esc(d) || '—' },
+        { data:null, title:'Bill Proof', orderable:false, render:(d, t, r) => 
+            r.bill_proof_url ? '<button class="action-icon" data-action="proof" title="View Bill" style="color:var(--navy-accent)"><i class="fas fa-image"></i></button>' : '—'
+        },
         { data:'user_name', title:'User' },
         { data:'note', title:'Note' }
       ];
-      useDataTable('inventoryTable', rows, cols, { onRefresh:() => mutate() });
+      const onAction = (action, row) => {
+        if (action === 'proof' && row.bill_proof_url) {
+          Swal.fire({
+            title: 'Supplier Bill Proof',
+            imageUrl: row.bill_proof_url,
+            imageAlt: 'Bill proof',
+            confirmButtonText: 'Close',
+            confirmButtonColor: 'var(--navy-primary)'
+          });
+        }
+      };
+      useDataTable('inventoryTable', rows, cols, { onAction, onRefresh:() => mutate() });
 
       const openAdjust = () => {
         if (!products.length) { Swal.fire({ icon:'warning', title:'No products', text:'Add a product first' }); return; }

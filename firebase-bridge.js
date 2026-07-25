@@ -1271,7 +1271,7 @@
       return ok('Product deleted');
     },
 
-    adjustStock: async (id, qtyChange, note, token) => {
+    adjustStock: async (id, qtyChange, note, supplierId, invoiceNo, billProofUrl, token) => {
       const uid = await gate(token, 'inventory', 'a');
       if (!uid) return err('Access denied');
 
@@ -1294,7 +1294,13 @@
         const movementRef = db.collection('inventory_movements').doc(String(movementId));
         
         transaction.set(movementRef, {
-          id: movementId, product_id: Number(id), user_id: uid, movement_type: 'adjustment', qty_change: delta, note: note || '', created: nowIso, updated: nowIso
+          id: movementId, product_id: Number(id), user_id: uid, 
+          movement_type: delta > 0 ? 'purchase' : 'adjustment', 
+          qty_change: delta, note: note || '', 
+          supplier_id: supplierId ? Number(supplierId) : null,
+          invoice_no: invoiceNo || '',
+          bill_proof_url: billProofUrl || '',
+          created: nowIso, updated: nowIso
         });
 
         return ok('Stock adjusted');
@@ -1401,6 +1407,10 @@
       const pm = {};
       productsSnap.forEach(d => { pm[d.data().id] = d.data().name; });
       const users = await resolveUserNames();
+      
+      const suppliersSnap = await db.collection('suppliers').get();
+      const sm = {};
+      suppliersSnap.forEach(d => { sm[d.data().id] = d.data().name; });
 
       const data = [];
       snapshot.forEach(doc => {
@@ -1410,6 +1420,7 @@
         if (to && date > to) return;
         m.product_name = pm[m.product_id] || '—';
         m.user_name = users[m.user_id] || '—';
+        m.supplier_name = m.supplier_id ? (sm[m.supplier_id] || '—') : '—';
         data.push(m);
       });
 
