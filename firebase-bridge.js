@@ -987,23 +987,23 @@
     },
 
     updateUserSettings: async (token, settings) => {
-      const user = await resolveUserFromToken(token);
-      if (!user) return err('Not signed in');
+      const s = await getSession(token);
+      if (!s) return err('Not signed in');
 
       const updateData = { updated_at: new Date().toISOString() };
       if (settings.profileImage !== undefined) updateData.profile_image = settings.profileImage;
       if (settings.themeMode !== undefined) updateData.theme_mode = settings.themeMode;
       if (settings.customColors !== undefined) updateData.custom_colors = settings.customColors;
 
-      await db.collection('users').doc(String(user.id)).update(updateData);
+      await db.collection('users').doc(String(s.uid)).update(updateData);
       return ok('Settings updated');
     },
 
     // ---- File Uploads ----
     uploadProfileImage: async (base64Data, filename, token) => {
-      const user = await resolveUserFromToken(token);
-      if (!user) return err('Not signed in');
-      return uploadAsset(base64Data, filename, `profile_${user.id}`);
+      const s = await getSession(token);
+      if (!s) return err('Not signed in');
+      return uploadAsset(base64Data, filename, `profile_${s.uid}`);
     },
 
     uploadShopLogo: async (base64Data, filename, token) => {
