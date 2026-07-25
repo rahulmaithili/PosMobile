@@ -3623,24 +3623,22 @@
             <button className={`btn ${activeTab === 'purchases' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab('purchases')} style={{borderRadius:'6px', display:'flex', alignItems:'center', gap:'6px'}}><i className="fas fa-file-invoice-dollar"></i> Purchases & Bills Dues</button>
           </div>
 
-          {activeTab === 'list' ? (
-            <>
-              <div className="section-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px'}}>
-                <h2 style={{display:'flex', alignItems:'center', gap:'8px', color:'var(--navy-primary)', margin:0}}><i className="fas fa-truck-field"></i> Suppliers</h2>
-                {canAdd && <button className="btn btn-primary" onClick={() => { setEditing(null); setShow(true); }}><i className="fas fa-plus"></i> Add Supplier</button>}
-              </div>
-              {canAdd && <input type="file" id="suppliersCsvImport" accept=".csv" style={{display:'none'}} onChange={(e) => csvImport(e, 'bulkImportSuppliers', userId, 'suppliers', mutate)} />}
-              {rows === undefined ? <TableSkeleton rows={6} columns={8} /> : <table id="suppliersTable" className="display" style={{width:'100%'}}></table>}
-            </>
-          ) : (
-            <>
-              <div className="section-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px'}}>
-                <h2 style={{display:'flex', alignItems:'center', gap:'8px', color:'var(--navy-primary)', margin:0}}><i className="fas fa-file-invoice-dollar"></i> Supplier Purchases & Dues Ledger</h2>
-                {canAdd && <button className="btn btn-primary" onClick={() => setShowAddPurchase(true)}><i className="fas fa-plus"></i> Record Purchase Entry</button>}
-              </div>
-              {purRes === undefined ? <TableSkeleton rows={6} columns={8} /> : <table id="supplierPurchasesTable" className="display" style={{width:'100%'}}></table>}
-            </>
-          )}
+          <div style={{display: activeTab === 'list' ? 'block' : 'none'}}>
+            <div className="section-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px'}}>
+              <h2 style={{display:'flex', alignItems:'center', gap:'8px', color:'var(--navy-primary)', margin:0}}><i className="fas fa-truck-field"></i> Suppliers</h2>
+              {canAdd && <button className="btn btn-primary" onClick={() => { setEditing(null); setShow(true); }}><i className="fas fa-plus"></i> Add Supplier</button>}
+            </div>
+            {canAdd && <input type="file" id="suppliersCsvImport" accept=".csv" style={{display:'none'}} onChange={(e) => csvImport(e, 'bulkImportSuppliers', userId, 'suppliers', mutate)} />}
+            {rows === undefined ? <TableSkeleton rows={6} columns={8} /> : <table id="suppliersTable" className="display" style={{width:'100%'}}></table>}
+          </div>
+
+          <div style={{display: activeTab === 'purchases' ? 'block' : 'none'}}>
+            <div className="section-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px'}}>
+              <h2 style={{display:'flex', alignItems:'center', gap:'8px', color:'var(--navy-primary)', margin:0}}><i className="fas fa-file-invoice-dollar"></i> Supplier Purchases & Dues Ledger</h2>
+              {canAdd && <button className="btn btn-primary" onClick={() => setShowAddPurchase(true)}><i className="fas fa-plus"></i> Record Purchase Entry</button>}
+            </div>
+            {purRes === undefined ? <TableSkeleton rows={6} columns={8} /> : <table id="supplierPurchasesTable" className="display" style={{width:'100%'}}></table>}
+          </div>
 
           {show && <SupplierModal supplier={editing} onClose={() => { setShow(false); setEditing(null); }} onSave={save} />}
           {viewS && <SupplierView supplier={viewS} products={allProducts} onClose={() => setViewS(null)} />}
