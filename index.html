@@ -5152,32 +5152,46 @@
       const handleLogo = async (e) => {
         const file = e.target.files[0]; if (!file) return;
         setBusy('Uploading logo…');
-        const base64 = await readBase64(file);
-        gsRun('uploadShopLogo', base64, file.name, userId).then(r => {
+        try {
+          const base64 = await readBase64(file);
+          const r = await gsRun('uploadShopLogo', base64, file.name, userId);
           if (r.success) {
             const next = { ...(shop || {}), shop_logo: r.fileUrl };
-            gsRun('saveShopSettings', { shop_logo: r.fileUrl }, userId).then(() => {
-              setBusy(''); setShop(next); setBase(b => ({ ...(b || {}), shop_logo: r.fileUrl })); refreshShopGlobal(next);
-              Swal.fire({ icon:'success', title:'Logo updated', timer:1100, showConfirmButton:false });
-              onSettingsUpdate && onSettingsUpdate();
-            });
-          } else { setBusy(''); Swal.fire({ icon:'error', title:'Upload failed', text:r.message }); }
-        });
+            await gsRun('saveShopSettings', { shop_logo: r.fileUrl }, userId);
+            setBusy(''); setShop(next); setBase(b => ({ ...(b || {}), shop_logo: r.fileUrl })); refreshShopGlobal(next);
+            Swal.fire({ icon:'success', title:'Logo updated', timer:1100, showConfirmButton:false });
+            onSettingsUpdate && onSettingsUpdate();
+          } else {
+            setBusy('');
+            Swal.fire({ icon:'error', title:'Upload failed', text:r.message });
+          }
+        } catch (err) {
+          setBusy('');
+          console.error(err);
+          Swal.fire({ icon:'error', title:'Upload error', text: err.message || 'Failed to save logo. Image might be too large (>1MB) if Firebase Storage is disabled.' });
+        }
         e.target.value = '';
       };
       const handleFile = async (e) => {
         const file = e.target.files[0]; if (!file) return;
         setBusy('Uploading…');
-        const base64 = await readBase64(file);
-        gsRun('uploadProfileImage', base64, file.name, userId).then(r => {
+        try {
+          const base64 = await readBase64(file);
+          const r = await gsRun('uploadProfileImage', base64, file.name, userId);
           if (r.success) {
-            gsRun('updateUserSettings', userId, { profileImage: r.fileUrl }).then(() => {
-              setBusy(''); setProfileImg(r.fileUrl);
-              Swal.fire({ icon:'success', title:'Profile photo updated', timer:1100, showConfirmButton:false });
-              onSettingsUpdate && onSettingsUpdate();
-            });
-          } else { setBusy(''); Swal.fire({ icon:'error', title:'Upload failed', text:r.message }); }
-        });
+            await gsRun('updateUserSettings', userId, { profileImage: r.fileUrl });
+            setBusy(''); setProfileImg(r.fileUrl);
+            Swal.fire({ icon:'success', title:'Profile photo updated', timer:1100, showConfirmButton:false });
+            onSettingsUpdate && onSettingsUpdate();
+          } else {
+            setBusy('');
+            Swal.fire({ icon:'error', title:'Upload failed', text:r.message });
+          }
+        } catch (err) {
+          setBusy('');
+          console.error(err);
+          Swal.fire({ icon:'error', title:'Upload error', text: err.message || 'Failed to save photo. Image might be too large (>1MB) if Firebase Storage is disabled.' });
+        }
         e.target.value = '';
       };
 

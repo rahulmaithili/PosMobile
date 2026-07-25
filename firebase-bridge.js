@@ -102,7 +102,12 @@
       firebase.initializeApp(config);
     }
     db = firebase.firestore();
-    storage = firebase.storage();
+    try {
+      storage = firebase.storage();
+    } catch (e) {
+      console.warn("Firebase Storage failed to initialize:", e);
+      storage = null;
+    }
     isInitialized = true;
   }
 
