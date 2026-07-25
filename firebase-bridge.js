@@ -1269,13 +1269,13 @@
       const uid = await gate(token, 'suppliers', 'v');
       if (!uid) return err('Access denied');
 
-      const snapshot = await db.collection('supplier_payments')
-        .where('purchase_id', '==', Number(purchaseId))
-        .get();
+      const snapshot = await db.collection('supplier_payments').get();
       const data = [];
+      const pid = Number(purchaseId);
       snapshot.forEach(doc => {
         const p = doc.data();
-        if (Number(p.deleted) !== 1) data.push(p);
+        if (Number(p.deleted) === 1) return;
+        if (Number(p.purchase_id) === pid) data.push(p);
       });
       data.sort((a, b) => b.id - a.id);
       return ok('', { data });
@@ -1286,6 +1286,9 @@
       if (!uid) return err('Access denied');
 
       const purchaseRef = db.collection('supplier_purchases').doc(String(purchaseId));
+
+      // Get payment ID BEFORE the transaction (avoid nested Firestore ops)
+      const paymentId = await getNextId('supplier_payments');
 
       return db.runTransaction(async (transaction) => {
         const purDoc = await transaction.get(purchaseRef);
@@ -1308,7 +1311,6 @@
           updated: nowIso
         });
 
-        const paymentId = await getNextId('supplier_payments');
         transaction.set(db.collection('supplier_payments').doc(String(paymentId)), {
           id: paymentId,
           purchase_id: Number(purchaseId),
@@ -3875,7 +3877,7 @@
         });
       } catch(e) { console.warn('Rojnamcha drawer err:', e.message); }
 
-      return ok('', {
+      return ok('', { data: {
         sales: { total: totalSales, discount: totalDiscount, breakdown: salesByMethod },
         repairs: { total: totalRepairs, breakdown: repairsByMethod },
         expenses: { total: totalExpenses, breakdown: expensesByMethod },
@@ -3884,7 +3886,7 @@
         usedSpend: { total: totalUsedSpend, breakdown: usedSpendByMethod },
         installments: { total: totalInstallments, breakdown: installmentsByMethod },
         till: { opening: openingBalance, closing: closingBalance, isTillOpen }
-      });
+      } });
     }
   };
 

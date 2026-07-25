@@ -4264,7 +4264,7 @@
     }
 
     function SupplierPaymentsModal({ purchase, onClose, userId, onEditPayment, onDeletePayment }) {
-      const { data: payRes, mutate: mutatePays } = useSWR(purchase ? `supplier_payments:pur:${purchase.id}` : null, () => gsRun('getSupplierPayments', purchase.id));
+      const { data: payRes, mutate: mutatePays } = useSWR(purchase ? `supplier_payments:pur:${purchase.id}` : null, () => gsRun('getSupplierPayments', purchase.id, userId));
       const payments = payRes && payRes.success ? payRes.data : [];
 
       return (
@@ -6167,7 +6167,7 @@
 
     function RojnamchaView({ userId, role, perms }) {
       const [date, setDate] = useState(todayStr());
-      const { data: res, error, mutate } = useSWR(date ? `rojnamcha:${date}` : null, () => gsRun('getRojnamcha', date), { revalidateOnFocus: false });
+      const { data: res, error, mutate } = useSWR(date ? `rojnamcha:${date}` : null, () => gsRun('getRojnamcha', date, userId), { revalidateOnFocus: false });
       const d = res && res.success ? res.data : null;
       
       const shop = window.SHOP || {};
