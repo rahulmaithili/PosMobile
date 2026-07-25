@@ -2257,8 +2257,8 @@
             : (['inactive','unpaid','sold','cancelled'].indexOf(s) !== -1) ? '#b91c1c' : '#b45309';
       return '<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;color:#fff;background:' + c + '">' + esc(s.replace(/_/g, ' ')) + '</span>';
     }
-    function money(n){
-      var S = window.SHOP || {}, sym = S.currency || '€';
+    function money(n, customShop = null){
+      var S = customShop || window.SHOP || {}, sym = S.currency || '€';
       var dec = (S.currency_decimals === 0 || S.currency_decimals) ? parseInt(S.currency_decimals) : 2; if (isNaN(dec)) dec = 2;
       var v = (Number(n)||0).toFixed(dec);
       return S.currency_position === 'after' ? (v + ' ' + sym) : (sym + v);
@@ -2362,6 +2362,7 @@
     // (a) thermal sale receipt — foots subtotal + vat_gross − discount = total
     function receiptHTML(sale){
       var c = shopCtx();
+      var money = function(n) { return window.money(n, sale); };
       var rows = (sale.items || []).map(function(l){ return '<tr><td>'+esc(l.name)+'<div class="sm">'+l.qty+' x '+money(l.unit_price)+'</div></td><td class="r">'+money(l.line_total)+'</td></tr>'; }).join('');
       var line = function(lbl, val, b){ return '<tr><td'+(b?' class="b"':'')+'>'+lbl+'</td><td class="r'+(b?' b':'')+'">'+val+'</td></tr>'; };
       var totals = line('Subtotal', money(sale.subtotal)) + line('VAT', money(sale.vat_gross));
@@ -2382,6 +2383,7 @@
     // (b) A4 tax invoice — net_amount taxable base + vat_amount (discount-apportioned)
     function invoiceHTML(sale){
       var c = shopCtx();
+      var money = function(n) { return window.money(n, sale); };
       var rows = (sale.items || []).map(function(l, i){ return '<tr><td>'+(i+1)+'</td><td>'+esc(l.name)+'</td><td class="r">'+l.qty+'</td><td class="r">'+money(l.unit_price)+'</td><td class="r">'+l.vat_rate+'%</td><td class="r">'+money(l.unit_price*l.qty)+'</td><td class="r">'+money(l.vat_amount)+'</td><td class="r">'+money(l.line_total)+'</td></tr>'; }).join('');
       var tf = '<tr><td colspan="7" class="r">Taxable (net)</td><td class="r">'+money(sale.net_amount)+'</td></tr>';
       if (Number(sale.discount) > 0) tf += '<tr><td colspan="7" class="r">Discount</td><td class="r">− '+money(sale.discount)+'</td></tr>';
@@ -4147,6 +4149,23 @@
       const [prodCat, setProdCat] = useState('');
       const [inStockOnly, setInStockOnly] = useState(false);
 
+      const currencyPresets = [
+        { symbol: '₹', code: 'INR', position: 'before', label: 'INR (₹)' },
+        { symbol: '€', code: 'EUR', position: 'before', label: 'EUR (€)' },
+        { symbol: '$', code: 'USD', position: 'before', label: 'USD ($)' },
+        { symbol: '£', code: 'GBP', position: 'before', label: 'GBP (£)' }
+      ];
+      const [cartCurrencyCode, setCartCurrencyCode] = useState(window.SHOP?.currency_code || 'INR');
+      const selectedPreset = currencyPresets.find(p => p.code === cartCurrencyCode) || currencyPresets[0];
+
+      const money = (n, customShop = null) => {
+        var S = customShop || window.SHOP || {};
+        var sym = customShop ? customShop.currency : selectedPreset.symbol;
+        var dec = (S.currency_decimals === 0 || S.currency_decimals) ? parseInt(S.currency_decimals) : 2; if (isNaN(dec)) dec = 2;
+        var v = (Number(n)||0).toFixed(dec);
+        return S.currency_position === 'after' ? (v + ' ' + sym) : (sym + v);
+      };
+
       const addToCart = (pid) => {
         const p = products.find(x => String(x.id) === String(pid));
         if (!p) return;
@@ -4207,6 +4226,9 @@
         gsRun('createSale', {
           customer_id: customerId || null, payment_method: pay, discount: disc, amount_paid: paid,
           redeem_points: usePts, apply_store_credit: creditApplied,
+          currency: selectedPreset.symbol,
+          currency_code: selectedPreset.code,
+          currency_position: selectedPreset.position,
           items: cart.map(c => ({ product_id:c.product_id, qty:c.qty, unit_price:c.unit_price }))
         }, userId).then(r => {
           setBusy('');
@@ -4214,7 +4236,7 @@
           mutateProducts(); mutateCust && mutateCust();
           const sale = r.data; sale.customer_name = sel ? sel.name : 'Walk-in';
           Swal.fire({ icon:'success', title:'Sale Complete',
-            html:`<div style="text-align:left">Sale ${esc(sale.invoice_no)}<br>Total: <b>${money(sale.total)}</b><br>Change: <b>${money(sale.change_given)}</b>${Number(sale.due_amount) > 0 ? '<br>Due: <b>' + money(sale.due_amount) + '</b>' : ''}</div>`,
+            html:`<div style="text-align:left">Sale ${esc(sale.invoice_no)}<br>Total: <b>${money(sale.total, sale)}</b><br>Change: <b>${money(sale.change_given, sale)}</b>${Number(sale.due_amount) > 0 ? '<br>Due: <b>' + money(sale.due_amount, sale) + '</b>' : ''}</div>`,
             showDenyButton:true, showCancelButton:true,
             confirmButtonText:'<i class="fas fa-receipt"></i> Print Receipt', denyButtonText:'<i class="fas fa-file-invoice"></i> A4 Invoice', cancelButtonText:'Done',
             confirmButtonColor:'var(--navy-primary)', denyButtonColor:'#0074D9'
@@ -4340,6 +4362,14 @@
                 )}
 
                 <div className="form-group">
+                  <label><i className="fas fa-coins"></i> Currency</label>
+                  <select className="swal2-select" style={{width:'100%', margin:0, background:'rgba(255,255,255,0.05)', color:'#fff', border:'1px solid rgba(255,255,255,0.2)', borderRadius:'6px', padding:'10px'}}
+                          value={cartCurrencyCode} onChange={(e) => setCartCurrencyCode(e.target.value)}>
+                    {currencyPresets.map(p => <option key={p.code} value={p.code} style={{background:'#001529'}}>{p.label}</option>)}
+                  </select>
+                </div>
+
+                <div className="form-group">
                   <label><i className="fas fa-wallet"></i> Payment</label>
                   <SearchableDropdown
                     options={[{value:'cash', label:'Cash'}, {value:'card', label:'Card'}, {value:'bank_transfer', label:'Bank Transfer'}]}
@@ -4403,10 +4433,10 @@
         { data:'customer_name', title:'Customer', render:(d) => esc(d) },
         { data:'cashier_name', title:'Cashier', render:(d) => esc(d) },
         { data:'items', title:'Items', render:(d) => (d && d.length) || 0 },
-        { data:'total', title:'Total', render:(v) => money(v) },
+        { data:'total', title:'Total', render:(v, type, row) => money(v, row) },
         { data:'payment_method', title:'Method', render:(d) => `<span class="status-badge">${esc((d || '').replace('_', ' '))}</span>` },
-        { data:'amount_paid', title:'Paid', render:(v) => money(v) },
-        { data:'due_amount', title:'Due', render:(v) => Number(v) ? `<span style="color:#b91c1c;font-weight:700">${money(v)}</span>` : money(0) },
+        { data:'amount_paid', title:'Paid', render:(v, type, row) => money(v, row) },
+        { data:'due_amount', title:'Due', render:(v, type, row) => Number(v) ? `<span style="color:#b91c1c;font-weight:700">${money(v, row)}</span>` : money(0, row) },
         { data:'payment_status', title:'Status', render:(d) => statusPill(d) },
         { data:'return_status', title:'Return', render:(d) => retPill(d) },
         { data:null, title:'Actions', orderable:false, render:(x, t, row) =>

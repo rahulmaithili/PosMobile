@@ -12,10 +12,10 @@
     shop_name:'Rameez Phone Hub', shop_tagline:'Sales · Repairs · Accessories',
     shop_address:'123 Market Street, Downtown', shop_city:'', shop_country:'',
     shop_phone:'+1 555 0100', shop_email:'hello@phoneshop.demo', shop_website:'', tax_id:'', shop_logo: 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg',
-    currency:'€', currency_code:'EUR', currency_position:'before', currency_decimals:'2',
+    currency:'₹', currency_code:'INR', currency_position:'before', currency_decimals:'2',
     vat_default:'21', enable_vat:'1', low_stock_default:'5',
     invoice_prefix:'INV-', repair_prefix:'RPR-', used_prefix:'UP-',
-    date_format:'YYYY-MM-DD', timezone:'', receipt_size:'80mm',
+    date_format:'YYYY-MM-DD', timezone:'GMT+5:30', receipt_size:'80mm',
     receipt_footer:'Thank you for shopping with us!', show_logo_on_receipt:'1',
     invoice_terms:'Goods sold are not returnable after 7 days. Warranty as per manufacturer.',
     contract_terms:'The seller confirms lawful ownership of the device and that it is not stolen or blocked. Sold as-is. ID verified at purchase.',
@@ -1352,6 +1352,10 @@
           payment_method: d.payment_method || 'cash', notes: d.notes || '', receipt_printed: 0,
           points_earned: earned, points_redeemed: redeemPts, redeem_value: redeemValue, store_credit_applied: creditApplied,
           returned_total: 0, returned_vat: 0, returned_cogs_restocked: 0, return_status: 'none', items: lines,
+          currency: d.currency || cfg.currency || '₹',
+          currency_code: d.currency_code || cfg.currency_code || 'INR',
+          currency_position: d.currency_position || cfg.currency_position || 'before',
+          currency_decimals: d.currency_decimals != null ? d.currency_decimals : (cfg.currency_decimals != null ? cfg.currency_decimals : 2),
           created: nowIso, updated: nowIso, deleted: 0
         };
 
