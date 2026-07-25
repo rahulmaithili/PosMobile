@@ -929,9 +929,57 @@
     getProductDetail: async (productId, token) => {
       const uid = await gate(token, 'products', 'v');
       if (!uid) return err('Access denied');
-      const doc = await db.collection('products').doc(String(productId)).get();
-      if (!doc.exists || doc.data().deleted) return err('Product not found');
-      return ok('', { data: doc.data() });
+      
+      const prodDoc = await db.collection('products').doc(String(productId)).get();
+      if (!prodDoc.exists || prodDoc.data().deleted) return err('Product not found');
+      const product = prodDoc.data();
+      
+      const users = await resolveUserNames();
+
+      const movesSnap = await db.collection('inventory_movements')
+        .where('product_id', '==', Number(productId))
+        .get();
+      const moves = [];
+      movesSnap.forEach(doc => {
+        const m = doc.data();
+        m.user_name = users[m.user_id] || '—';
+        moves.push(m);
+      });
+      moves.sort((a, b) => b.id - a.id);
+      const slicedMoves = moves.slice(0, 100);
+
+      const salesSnap = await db.collection('sales').get();
+      let sold = [];
+      salesSnap.forEach(doc => {
+        const s = doc.data();
+        if (s.deleted) return;
+        (s.items || []).forEach(l => {
+          if (Number(l.product_id) === Number(productId)) {
+            sold.push({
+              invoice_no: s.invoice_no,
+              created: s.created,
+              qty: Number(l.qty),
+              unit_price: round2(l.unit_price),
+              currency: s.currency || '₹',
+              currency_code: s.currency_code || 'INR',
+              currency_position: s.currency_position || 'before',
+              currency_decimals: s.currency_decimals != null ? s.currency_decimals : 2
+            });
+          }
+        });
+      });
+      sold.sort((a, b) => new Date(b.created) - new Date(a.created));
+      const slicedSold = sold.slice(0, 100);
+      const soldQty = sold.reduce((sum, item) => sum + Number(item.qty), 0);
+
+      return ok('', {
+        data: {
+          product,
+          moves: slicedMoves,
+          sold: slicedSold,
+          soldQty
+        }
+      });
     },
 
     addProduct: async (d, token) => {
@@ -1877,32 +1925,93 @@
 
       const cDoc = await db.collection('customers').doc(String(customerId)).get();
       if (!cDoc.exists || cDoc.data().deleted) return err('Customer not found');
+      const c = cDoc.data();
 
+      const um = await resolveUserNames();
+
+      // Fetch sales
       const salesSnap = await db.collection('sales').where('customer_id', '==', Number(customerId)).get();
-      const repairsSnap = await db.collection('repairs').where('customer_id', '==', Number(customerId)).get();
-
-      let totalSpend = 0;
-      let salesCount = 0;
-      let repairsCount = 0;
-      let latestPurchase = null;
-
+      const sales = [];
       salesSnap.forEach(d => {
         const s = d.data();
         if (s.deleted) return;
-        totalSpend = round2(totalSpend + Number(s.total));
-        salesCount++;
-        if (!latestPurchase || s.created > latestPurchase) latestPurchase = s.created;
+        sales.push({
+          id: s.id, invoice_no: s.invoice_no, created: s.created,
+          total: round2(s.total), amount_paid: round2(s.amount_paid), due_amount: round2(s.due_amount),
+          payment_status: s.payment_status, payment_method: s.payment_method, return_status: s.return_status, items: (s.items || []),
+          currency: s.currency || '₹',
+          currency_code: s.currency_code || 'INR',
+          currency_position: s.currency_position || 'before',
+          currency_decimals: s.currency_decimals != null ? s.currency_decimals : 2
+        });
       });
+      sales.sort((a, b) => b.id - a.id);
 
+      // Fetch repairs
+      const repairsSnap = await db.collection('repairs').where('customer_id', '==', Number(customerId)).get();
+      const repairs = [];
       repairsSnap.forEach(d => {
         const r = d.data();
         if (r.deleted) return;
-        totalSpend = round2(totalSpend + Number(r.total_cost));
-        repairsCount++;
+        repairs.push({
+          id: r.id, ticket_no: r.ticket_no, device_name: r.device_name,
+          created: r.created, total_cost: round2(r.total_cost), paid_amount: round2(r.paid_amount),
+          remaining_amount: round2(r.remaining_amount), status: r.status, tech_name: um[r.assigned_user_id] || '-'
+        });
       });
+      repairs.sort((a, b) => b.id - a.id);
+
+      // Fetch used phones
+      const usedSnap = await db.collection('used_phones').where('customer_id', '==', Number(customerId)).get();
+      const used = [];
+      usedSnap.forEach(d => {
+        const u = d.data();
+        if (u.deleted) return;
+        used.push({
+          id: u.id, device_name: u.device_name, imei: u.imei, created: u.created,
+          purchase_price: round2(u.purchase_price), status: u.status
+        });
+      });
+      used.sort((a, b) => b.id - a.id);
+
+      // Fetch payments
+      const paymentsSnap = await db.collection('payments').where('customer_id', '==', Number(customerId)).get();
+      const payments = [];
+      paymentsSnap.forEach(d => {
+        const p = d.data();
+        if (p.deleted) return;
+        p.user_name = um[p.user_id] || '-';
+        payments.push(p);
+      });
+      payments.sort((a, b) => b.id - a.id);
+
+      const totalInvoiced = round2(sales.reduce((sum, s) => sum + Number(s.total), 0));
+      const totalPaid = round2(
+        sales.reduce((sum, s) => sum + Number(s.amount_paid), 0) +
+        repairs.reduce((sum, r) => sum + Number(r.paid_amount), 0)
+      );
+      const outstanding = round2(
+        sales.reduce((sum, s) => sum + Number(s.due_amount), 0) +
+        repairs.reduce((sum, r) => sum + Number(r.remaining_amount), 0)
+      );
+
+      const dates = [c.created]
+        .concat(sales.map(s => s.created))
+        .concat(repairs.map(r => r.created))
+        .concat(used.map(u => u.created))
+        .filter(Boolean);
+      dates.sort();
+      const lastActivity = dates.pop() || c.created;
 
       return ok('', { data: {
-        customer: cDoc.data(), totalSpend, salesCount, repairsCount, latestPurchase: latestPurchase || '—'
+        customer: {
+          id: c.id, name: c.name, phone: c.phone, email: c.email, company: c.company,
+          city: c.city, country: c.country, address: c.address, customer_type: c.customer_type,
+          credit_limit: round2(c.credit_limit), loyalty_points: Number(c.loyalty_points) || 0,
+          store_credit: round2(c.store_credit), status: c.status, created: c.created, notes: c.notes
+        },
+        sales, repairs, used, payments,
+        kpi: { totalInvoiced, totalPaid, outstanding, orders: sales.length, repairs: repairs.length, used: used.length, lastActivity }
       } });
     },
 

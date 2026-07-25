@@ -3569,7 +3569,7 @@
       const moveTab = D.moves.length ? <div className="about-table-wrapper"><table className="about-roles-table"><thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Note</th><th>By</th></tr></thead>
         <tbody>{D.moves.map((m, i) => <tr key={i}><td>{fmtDate(m.created)}</td><td>{esc((m.movement_type || '').replace('_', ' '))}</td><td style={{color: Number(m.qty_change) >= 0 ? '#2e7d32' : '#c5221f', fontWeight:600}}>{Number(m.qty_change) > 0 ? '+' : ''}{m.qty_change}</td><td>{esc(m.note) || '—'}</td><td>{esc(m.user_name)}</td></tr>)}</tbody></table></div> : <VmEmpty text="No stock movements." />;
       const soldTab = D.sold.length ? <div className="about-table-wrapper"><table className="about-roles-table"><thead><tr><th>Invoice</th><th>Date</th><th>Qty</th><th>Unit Price</th></tr></thead>
-        <tbody>{D.sold.map((x, i) => <tr key={i}><td>{esc(x.invoice_no)}</td><td>{fmtDay(x.created)}</td><td>{x.qty}</td><td>{money(x.unit_price)}</td></tr>)}</tbody></table></div> : <VmEmpty text="Not sold yet." />;
+        <tbody>{D.sold.map((x, i) => <tr key={i}><td>{esc(x.invoice_no)}</td><td>{fmtDay(x.created)}</td><td>{x.qty}</td><td>{money(x.unit_price, x)}</td></tr>)}</tbody></table></div> : <VmEmpty text="Not sold yet." />;
       return <ViewModal title={p.name} icon="fa-box" width="820px" onClose={onClose} tabs={[
         { key:'details', label:'Details', icon:'fa-circle-info', content:details },
         { key:'stock', label:'Stock Movement', icon:'fa-warehouse', badge:D.moves.length, content:moveTab },
@@ -4451,8 +4451,8 @@
         if (action === 'receipt') { if (printDoc(receiptHTML(row), 'Receipt ' + row.invoice_no, shopCtx().size)) gsRun('markReceiptPrinted', row.id, userId).then(() => mutate()); }
         else if (action === 'invoice') { if (printDoc(invoiceHTML(row), 'Invoice ' + row.invoice_no, 'a4')) gsRun('markReceiptPrinted', row.id, userId).then(() => mutate()); }
         else if (action === 'view') {
-          const lines = (row.items || []).map(l => `${esc(l.name)} ×${l.qty} — ${money(l.line_total)}`).join('<br>');
-          Swal.fire({ title: esc(row.invoice_no || 'Sale'), html:`<div style="text-align:left;font-size:13px">${lines}<hr>Total: <b>${money(row.total)}</b><br>Paid: ${money(row.amount_paid)} · Due: ${money(row.due_amount)}<br>Status: ${esc(row.payment_status)}${row.return_status && row.return_status !== 'none' ? ' · Return: ' + esc(row.return_status) : ''}</div>` });
+          const lines = (row.items || []).map(l => `${esc(l.name)} ×${l.qty} — ${money(l.line_total, row)}`).join('<br>');
+          Swal.fire({ title: esc(row.invoice_no || 'Sale'), html:`<div style="text-align:left;font-size:13px">${lines}<hr>Total: <b>${money(row.total, row)}</b><br>Paid: ${money(row.amount_paid, row)} · Due: ${money(row.due_amount, row)}<br>Status: ${esc(row.payment_status)}${row.return_status && row.return_status !== 'none' ? ' · Return: ' + esc(row.return_status) : ''}</div>` });
         }
         else if (action === 'return') { setReturning(row); }
         else if (action === 'void') {
