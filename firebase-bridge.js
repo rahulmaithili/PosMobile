@@ -2812,7 +2812,7 @@
       return ok('', { data });
     },
 
-    createInstallmentPlan: async (saleId, downPayment, numInstallments, method, token) => {
+    createInstallmentPlan: async (saleId, downPayment, numInstallments, method, interestRate, interestAmount, token) => {
       const uid = await gate(token, 'installments', 'a');
       if (!uid) return err('Access denied');
 
@@ -2829,27 +2829,29 @@
         const s = saleDoc.data();
 
         let dp = round2(downPayment);
-        if (dp > Number(s.due_amount)) throw new Error('Down payment cannot exceed due amount');
+        const interest = round2(interestAmount) || 0;
+        const newTotal = round2(s.total + interest);
+        const newDue = round2(s.due_amount + interest - dp);
+        if (newDue < 0) throw new Error('Down payment cannot exceed due amount');
 
         const nowIso = new Date().toISOString();
 
-        // Apply down payment if > 0
-        if (dp > 0) {
-          const newPaid = round2(Number(s.amount_paid) + dp);
-          const newDue = round2(s.total - newPaid);
-          transaction.update(saleRef, {
-            amount_paid: newPaid, due_amount: newDue, payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'), updated: nowIso
-          });
+        transaction.update(saleRef, {
+          total: newTotal,
+          amount_paid: round2(Number(s.amount_paid) + dp),
+          due_amount: newDue,
+          payment_status: newDue <= 0 ? 'paid' : ((Number(s.amount_paid) + dp) <= 0 ? 'unpaid' : 'partial'),
+          updated: nowIso
+        });
 
+        if (dp > 0) {
           const paymentId = await getNextId('payments');
           transaction.set(db.collection('payments').doc(String(paymentId)), {
             id: paymentId, customer_id: s.customer_id, ref_type: 'sale', ref_id: s.id, amount: dp, method, note: 'Downpayment', user_id: uid, created: nowIso, updated: nowIso, deleted: 0
           });
-          
-          s.due_amount = newDue;
         }
 
-        const due = round2(s.due_amount);
+        const due = round2(newDue);
         if (due > 0) {
           const numInst = parseInt(numInstallments) || 3;
           const instAmount = round2(due / numInst);
@@ -2874,7 +2876,7 @@
       });
     },
 
-    recordInstallmentPayment: async (installmentId, amount, method, token) => {
+    recordInstallmentPayment: async (installmentId, amount, method, proofUrl, token) => {
       const uid = await gate(token, 'installments', 'e');
       if (!uid) return err('Access denied');
 
@@ -2919,13 +2921,183 @@
         // 3. Insert payment ledger log
         const paymentId = await getNextId('payments');
         transaction.set(db.collection('payments').doc(String(paymentId)), {
-          id: paymentId, customer_id: inst.customer_id, ref_type: 'sale', ref_id: s.id, amount: amt, method, note: `Installment #${installmentId}`, user_id: uid, created: nowIso, updated: nowIso, deleted: 0
+          id: paymentId, customer_id: inst.customer_id, ref_type: 'sale', ref_id: s.id,
+          installment_id: Number(installmentId), amount: amt, method, proof_url: proofUrl || '',
+          note: `Installment #${installmentId}`, user_id: uid, created: nowIso, updated: nowIso, deleted: 0
         });
 
         return { invoice_no: s.invoice_no, amt };
       }).then(async (res) => {
         await logActivity(uid, 'payment', 'payments', installmentId, `Installment #${installmentId} payment ${res.amt} (${method})`);
         return ok('Payment recorded successfully');
+      }).catch(err => {
+        return { success: false, message: err.message };
+      });
+    },
+
+    getInstallmentPayments: async (saleId, token) => {
+      const uid = await gate(token, 'installments', 'v');
+      if (!uid) return err('Access denied');
+      const snapshot = await db.collection('payments')
+        .where('ref_id', '==', Number(saleId))
+        .where('ref_type', '==', 'sale')
+        .get();
+      const data = [];
+      snapshot.forEach(doc => {
+        const p = doc.data();
+        if (Number(p.deleted) !== 1) data.push(p);
+      });
+      return ok('', { data });
+    },
+
+    updateInstallmentPayment: async (paymentId, amount, method, proofUrl, token) => {
+      const uid = await gate(token, 'installments', 'e');
+      if (!uid) return err('Access denied');
+
+      const payRef = db.collection('payments').doc(String(paymentId));
+
+      return db.runTransaction(async (transaction) => {
+        const payDoc = await transaction.get(payRef);
+        if (!payDoc.exists || payDoc.data().deleted) throw new Error('Payment not found');
+        const p = payDoc.data();
+
+        if (!p.installment_id) {
+          const saleRef = db.collection('sales').doc(String(p.ref_id));
+          const saleDoc = await transaction.get(saleRef);
+          if (!saleDoc.exists) throw new Error('Sale not found');
+          const s = saleDoc.data();
+
+          const oldAmt = round2(p.amount);
+          const newAmt = round2(amount);
+          const diff = round2(newAmt - oldAmt);
+
+          const newPaid = round2(Number(s.amount_paid) + diff);
+          const newDue = round2(Math.max(0, Number(s.total) - newPaid));
+
+          transaction.update(saleRef, {
+            amount_paid: newPaid,
+            due_amount: newDue,
+            payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'),
+            updated: new Date().toISOString()
+          });
+
+          transaction.update(payRef, {
+            amount: newAmt,
+            method,
+            proof_url: proofUrl || '',
+            updated: new Date().toISOString()
+          });
+          return;
+        }
+
+        const instRef = db.collection('installments').doc(String(p.installment_id));
+        const instDoc = await transaction.get(instRef);
+        if (!instDoc.exists) throw new Error('Installment not found');
+        const inst = instDoc.data();
+
+        const saleRef = db.collection('sales').doc(String(p.ref_id));
+        const saleDoc = await transaction.get(saleRef);
+        if (!saleDoc.exists) throw new Error('Sale not found');
+        const s = saleDoc.data();
+
+        const oldAmt = round2(p.amount);
+        const newAmt = round2(amount);
+        const diff = round2(newAmt - oldAmt);
+
+        const newInstPaid = round2(Number(inst.paid_amount) + diff);
+        const isPaid = newInstPaid >= round2(inst.amount);
+        transaction.update(instRef, {
+          paid_amount: newInstPaid,
+          status: isPaid ? 'paid' : 'pending',
+          paid_date: isPaid ? ymd(new Date()) : '',
+          updated: new Date().toISOString()
+        });
+
+        const newPaid = round2(Number(s.amount_paid) + diff);
+        const newDue = round2(Math.max(0, Number(s.total) - newPaid));
+        transaction.update(saleRef, {
+          amount_paid: newPaid,
+          due_amount: newDue,
+          payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'),
+          updated: new Date().toISOString()
+        });
+
+        transaction.update(payRef, {
+          amount: newAmt,
+          method,
+          proof_url: proofUrl || '',
+          updated: new Date().toISOString()
+        });
+      }).then(() => {
+        return ok('Payment updated successfully');
+      }).catch(err => {
+        return { success: false, message: err.message };
+      });
+    },
+
+    deleteInstallmentPayment: async (paymentId, token) => {
+      const uid = await gate(token, 'installments', 'd');
+      if (!uid) return err('Access denied');
+
+      const payRef = db.collection('payments').doc(String(paymentId));
+
+      return db.runTransaction(async (transaction) => {
+        const payDoc = await transaction.get(payRef);
+        if (!payDoc.exists || payDoc.data().deleted) throw new Error('Payment not found');
+        const p = payDoc.data();
+
+        const amt = round2(p.amount);
+
+        if (!p.installment_id) {
+          const saleRef = db.collection('sales').doc(String(p.ref_id));
+          const saleDoc = await transaction.get(saleRef);
+          if (!saleDoc.exists) throw new Error('Sale not found');
+          const s = saleDoc.data();
+
+          const newPaid = round2(Math.max(0, Number(s.amount_paid) - amt));
+          const newDue = round2(Number(s.total) - newPaid);
+
+          transaction.update(saleRef, {
+            amount_paid: newPaid,
+            due_amount: newDue,
+            payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'),
+            updated: new Date().toISOString()
+          });
+
+          transaction.update(payRef, { deleted: 1, updated: new Date().toISOString() });
+          return;
+        }
+
+        const instRef = db.collection('installments').doc(String(p.installment_id));
+        const instDoc = await transaction.get(instRef);
+        if (!instDoc.exists) throw new Error('Installment not found');
+        const inst = instDoc.data();
+
+        const saleRef = db.collection('sales').doc(String(p.ref_id));
+        const saleDoc = await transaction.get(saleRef);
+        if (!saleDoc.exists) throw new Error('Sale not found');
+        const s = saleDoc.data();
+
+        const newInstPaid = round2(Math.max(0, Number(inst.paid_amount) - amt));
+        transaction.update(instRef, {
+          paid_amount: newInstPaid,
+          status: 'pending',
+          paid_date: '',
+          updated: new Date().toISOString()
+        });
+
+        const newPaid = round2(Math.max(0, Number(s.amount_paid) - amt));
+        const newDue = round2(Number(s.total) - newPaid);
+        transaction.update(saleRef, {
+          amount_paid: newPaid,
+          due_amount: newDue,
+          payment_status: newDue <= 0 ? 'paid' : (newPaid <= 0 ? 'unpaid' : 'partial'),
+          updated: new Date().toISOString()
+        });
+
+        transaction.update(payRef, { deleted: 1, updated: new Date().toISOString() });
+      }).then(() => {
+        return ok('Payment deleted successfully');
       }).catch(err => {
         return { success: false, message: err.message };
       });

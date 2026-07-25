@@ -5983,20 +5983,64 @@
         dt:{ order:[[0,'asc']], createdRow:(tr, p) => { if (p.planStatus === 'overdue') tr.classList.add('row-danger'); else if (p.nextDue === today) tr.classList.add('row-warn'); } } });
       const sumR = (shown || []).reduce((a, p) => ({ total:a.total + p.total, paid:a.paid + p.paid, rem:a.rem + p.remaining }), { total:0, paid:0, rem:0 });
 
+      const [editPay, setEditPay] = useState(null);
+
       const createPlan = (form) => {
         setBusy('Creating plan…');
-        gsRun('createInstallmentPlan', form.sale_id, form.down_payment, form.num_installments, form.method, userId).then(r => {
+        gsRun('createInstallmentPlan', form.sale_id, form.down_payment, form.num_installments, form.method, form.interest_rate, form.interest_amount, userId).then(r => {
           setBusy('');
           if (r.success) { setShow(false); Swal.fire({ icon:'success', title:r.message, timer:1200, showConfirmButton:false }); mutate(); }
           else Swal.fire({ icon:'error', title:'Error', text:r.message });
         });
       };
-      const payInstallment = (amt, method) => {
+      const payInstallment = (amt, method, proofUrl) => {
         setBusy('Recording payment…');
-        gsRun('recordInstallmentPayment', payRow.id, amt, method, userId).then(r => {
+        gsRun('recordInstallmentPayment', payRow.id, amt, method, proofUrl, userId).then(r => {
           setBusy('');
           if (r.success) { setPayRow(null); Swal.fire({ icon:'success', title:r.message, timer:1200, showConfirmButton:false }); mutate(); }
           else Swal.fire({ icon:'error', title:'Error', text:r.message });
+        });
+      };
+      const deletePayment = (paymentId) => {
+        Swal.fire({
+          title: 'Delete Payment?',
+          text: 'This will restore the due balance on the installment plan and POS sale.',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: 'var(--danger)',
+          confirmButtonText: 'Delete'
+        }).then(res => {
+          if (res.isConfirmed) {
+            setBusy('Deleting payment…');
+            gsRun('deleteInstallmentPayment', paymentId, userId).then(r => {
+              setBusy('');
+              if (r.success) {
+                Swal.fire({ icon:'success', title:r.message, timer:1100, showConfirmButton:false });
+                const curKey = openKey;
+                setOpenKey(null);
+                setTimeout(() => setOpenKey(curKey), 100);
+                mutate();
+              } else {
+                Swal.fire({ icon:'error', title: 'Error', text: r.message });
+              }
+            });
+          }
+        });
+      };
+      const saveEditPayment = (paymentId, amt, method, proof) => {
+        setBusy('Updating payment…');
+        gsRun('updateInstallmentPayment', paymentId, amt, method, proof, userId).then(r => {
+          setBusy('');
+          if (r.success) {
+            setEditPay(null);
+            Swal.fire({ icon:'success', title:r.message, timer:1100, showConfirmButton:false });
+            const curKey = openKey;
+            setOpenKey(null);
+            setTimeout(() => setOpenKey(curKey), 100);
+            mutate();
+          } else {
+            Swal.fire({ icon:'error', title: 'Error', text: r.message });
+          }
         });
       };
 
@@ -6034,71 +6078,177 @@
           {rows === undefined ? <TableSkeleton rows={6} columns={9} /> : <table id="installmentsTable" className="display" style={{width:'100%'}}></table>}
           {rows !== undefined && (shown || []).length > 0 && <div className="table-summary"><span><i className="fas fa-users"></i> Customers:<b>{(shown || []).length}</b></span><span><i className="fas fa-sack-dollar"></i> Financed:<b>{money(sumR.total)}</b></span><span><i className="fas fa-money-bill-wave"></i> Collected:<b>{money(sumR.paid)}</b></span><span><i className="fas fa-hand-holding-dollar"></i> Outstanding:<b>{money(sumR.rem)}</b></span></div>}
 
-          {show && <CreateInstallmentPlanModal saleOpts={saleOpts} onClose={() => setShow(false)} onSave={createPlan} />}
-          {openPlan && <InstallmentPlanModal plan={openPlan} canPay={canPay} today={today} onPay={(t) => setPayRow(t)} onClose={() => setOpenKey(null)} />}
+          {show && <CreateInstallmentPlanModal saleOpts={saleOpts} salesList={saleRes && saleRes.success ? saleRes.data : []} onClose={() => setShow(false)} onSave={createPlan} />}
+          {openPlan && (
+            <InstallmentPlanModal
+              plan={openPlan}
+              canPay={canPay}
+              today={today}
+              onPay={(t) => setPayRow(t)}
+              onClose={() => setOpenKey(null)}
+              userId={userId}
+              onEditPayment={(p) => setEditPay(p)}
+              onDeletePayment={deletePayment}
+            />
+          )}
           {payRow && <InstallmentPayModal row={payRow} onClose={() => setPayRow(null)} onSave={payInstallment} />}
+          {editPay && (
+            <InstallmentPayModal
+              row={null}
+              payment={editPay}
+              onClose={() => setEditPay(null)}
+              onSave={(amt, method, proof) => saveEditPayment(editPay.id, amt, method, proof)}
+            />
+          )}
         </div>
       );
     }
-    function CreateInstallmentPlanModal({ saleOpts, onClose, onSave }) {
+    function CreateInstallmentPlanModal({ saleOpts, salesList, onClose, onSave }) {
       const [saleId, setSaleId] = useState('');
       const [down, setDown] = useState('');
       const [n, setN] = useState(3);
       const [method, setMethod] = useState('cash');
-      const methodOpts = [{ value:'cash', label:'Cash' }, { value:'card', label:'Card' }, { value:'bank_transfer', label:'Bank Transfer' }];
+      const [interestType, setInterestType] = useState('percent'); // 'percent' or 'flat'
+      const [interestVal, setInterestVal] = useState('0');
+      const methodOpts = [{ value:'cash', label:'Cash' }, { value:'card', label:'Card' }, { value:'bank_transfer', label:'Bank Transfer' }, { value:'gpay', label:'GPay' }, { value:'phonepe', label:'PhonePe' }];
+      const interestTypeOpts = [{ value:'percent', label:'Interest Rate (%)' }, { value:'flat', label:'Flat Interest (' + (window.SHOP?.currency || '₹') + ')' }];
+
+      const selectedSale = (salesList || []).find(s => s.id === Number(saleId));
+      const currentDue = selectedSale ? Number(selectedSale.due_amount) || 0 : 0;
+      const dp = Number(down) || 0;
+      const principal = Math.max(0, currentDue - dp);
+      const interestAmt = interestType === 'percent'
+        ? round2(principal * (Number(interestVal) || 0) / 100)
+        : (Number(interestVal) || 0);
+      const totalInstallments = round2(principal + interestAmt);
+      const numInst = parseInt(n) || 1;
+      const monthlyAmt = round2(totalInstallments / numInst);
+
       const submit = (e) => {
         e.preventDefault();
         if (!saleId) { Swal.fire({ icon:'warning', title:'Select a sale' }); return; }
         const cnt = parseInt(n) || 0;
         if (cnt < 1) { Swal.fire({ icon:'warning', title:'Enter at least 1 installment' }); return; }
-        onSave({ sale_id:saleId, down_payment:Number(down) || 0, num_installments:cnt, method });
+        if (dp > currentDue) { Swal.fire({ icon:'warning', title:'Down payment cannot exceed balance due' }); return; }
+        onSave({
+          sale_id: saleId,
+          down_payment: dp,
+          num_installments: cnt,
+          method,
+          interest_rate: interestType === 'percent' ? (Number(interestVal) || 0) : 0,
+          interest_amount: interestAmt
+        });
       };
+
       return (
         <div className="modal-overlay" onClick={onClose}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'480px'}}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'500px'}}>
             <div className="modal-header"><h3><i className="fas fa-hand-holding-dollar"></i> Create Installment Plan</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
             <div className="modal-body">
               <form onSubmit={submit}>
                 <div className="form-group"><label><i className="fas fa-file-invoice"></i> Sale *</label><SearchableDropdown options={saleOpts} value={saleId} onChange={setSaleId} placeholder="Select a sale with a balance due" /></div>
-                <div className="form-grid">
-                  <div className="form-group"><label><i className="fas fa-money-bill"></i> Down Payment</label><input type="number" step="0.01" min="0" value={down} onChange={(e) => setDown(e.target.value)} placeholder="0.00" /></div>
-                  <div className="form-group"><label><i className="fas fa-wallet"></i> Down Payment Method</label><SearchableDropdown options={methodOpts} value={method} onChange={setMethod} placeholder="Method" /></div>
-                  <div className="form-group"><label><i className="fas fa-list-ol"></i> No. of Installments *</label><input type="number" min="1" value={n} onChange={(e) => setN(e.target.value)} required /></div>
-                  <div className="form-group"><label><i className="fas fa-calendar-days"></i> Frequency</label><input type="text" value="Monthly" disabled /></div>
-                </div>
+                
+                {selectedSale && (
+                  <>
+                    <div className="form-grid">
+                      <div className="form-group"><label><i className="fas fa-money-bill"></i> Down Payment</label><input type="number" step="0.01" min="0" max={currentDue} value={down} onChange={(e) => setDown(e.target.value)} placeholder="0.00" /></div>
+                      <div className="form-group"><label><i className="fas fa-wallet"></i> Down Payment Method</label><SearchableDropdown options={methodOpts} value={method} onChange={setMethod} placeholder="Method" /></div>
+                    </div>
+                    <div className="form-grid">
+                      <div className="form-group"><label><i className="fas fa-percent"></i> Interest Type</label><SearchableDropdown options={interestTypeOpts} value={interestType} onChange={setInterestType} placeholder="Type" /></div>
+                      <div className="form-group"><label><i className="fas fa-calculator"></i> Interest Value</label><input type="number" step="0.01" min="0" value={interestVal} onChange={(e) => setInterestVal(e.target.value)} /></div>
+                    </div>
+                    <div className="form-grid">
+                      <div className="form-group"><label><i className="fas fa-list-ol"></i> No. of Installments *</label><input type="number" min="1" value={n} onChange={(e) => setN(e.target.value)} required /></div>
+                      <div className="form-group"><label><i className="fas fa-calendar-days"></i> Frequency</label><input type="text" value="Monthly" disabled /></div>
+                    </div>
+
+                    <div className="emi-calculator-preview" style={{background:'rgba(255,255,255,0.03)', padding:'12px', borderRadius:'8px', marginTop:'12px', border:'1px solid rgba(255,255,255,0.05)'}}>
+                      <h4 style={{margin:'0 0 8px 0', fontSize:'13px', color:'var(--navy-accent)', borderBottom:'1px solid rgba(255,255,255,0.05)', paddingBottom:'6px'}}><i className="fas fa-calculator"></i> Live EMI Calculation Preview</h4>
+                      <div style={{display:'flex', flexDirection:'column', gap:'4px', fontSize:'12px'}}>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Remaining Due:</span><b>{money(currentDue)}</b></div>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Down Payment:</span><b style={{color:'#ef4444'}}>- {money(dp)}</b></div>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Principal Amount:</span><b>{money(principal)}</b></div>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Interest Added:</span><b style={{color:'var(--warning)'}}>+ {money(interestAmt)}</b></div>
+                        <hr style={{border:'0', borderTop:'1px solid rgba(255,255,255,0.1)', margin:'6px 0'}} />
+                        <div style={{display:'flex', justifyContent:'space-between', fontSize:'14px', fontWeight:600}}><span>Total Financed:</span><b style={{color:'#2e7d32'}}>{money(totalInstallments)}</b></div>
+                        <div style={{display:'flex', justifyContent:'space-between', fontSize:'14px', fontWeight:600}}><span>Installment Amount:</span><b style={{color:'var(--navy-primary)'}}>{money(monthlyAmt)} / month</b></div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 {saleOpts.length === 0 && <p style={{color:'#b45309', fontSize:'13px'}}><i className="fas fa-circle-info"></i> No sales with an outstanding balance.</p>}
-                <div className="form-actions"><button type="submit" className="btn btn-primary"><i className="fas fa-save"></i> Create Plan</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
+                <div className="form-actions" style={{marginTop:'15px'}}><button type="submit" className="btn btn-primary"><i className="fas fa-save"></i> Create Plan</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
               </form>
             </div>
           </div>
         </div>
       );
     }
-    function InstallmentPayModal({ row, onClose, onSave }) {
-      const due = round2(Number(row.amount) - Number(row.paid_amount || 0));
-      const [amount, setAmount] = useState(String(due));
-      const [method, setMethod] = useState('cash');
-      const methodOpts = [{ value:'cash', label:'Cash' }, { value:'card', label:'Card' }, { value:'bank_transfer', label:'Bank Transfer' }];
+
+    function InstallmentPayModal({ row, payment, onClose, onSave }) {
+      const due = payment ? round2(payment.amount) : round2(Number(row.amount) - Number(row.paid_amount || 0));
+      const [amount, setAmount] = useState(payment ? String(payment.amount) : String(due));
+      const [method, setMethod] = useState(payment ? payment.method : 'cash');
+      const [proof, setProof] = useState(payment ? payment.proof_url || '' : '');
+      const [uploading, setUploading] = useState(false);
+      const methodOpts = [{ value:'cash', label:'Cash' }, { value:'card', label:'Card' }, { value:'bank_transfer', label:'Bank Transfer' }, { value:'gpay', label:'GPay' }, { value:'phonepe', label:'PhonePe' }, { value:'other', label:'Other Online' }];
+
+      const handleProofUpload = async (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        setUploading(true);
+        try {
+          const compressed = await compressImage(file, 450, 450, 0.7);
+          setProof(compressed);
+        } catch (err) {
+          console.error("Proof compression failed:", err);
+        } finally {
+          setUploading(false);
+        }
+      };
+
       const submit = () => {
         const amt = parseFloat(amount) || 0;
         if (amt <= 0) { Swal.fire({ icon:'warning', title:'Enter a valid amount' }); return; }
-        onSave(amt, method);
+        onSave(amt, method, proof);
       };
+
       return (
         <div className="modal-overlay" onClick={onClose}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'420px'}}>
-            <div className="modal-header"><h3><i className="fas fa-money-bill-wave"></i> Record Payment — {esc(row.invoice_no)}</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
+            <div className="modal-header"><h3><i className="fas fa-money-bill-wave"></i> {payment ? 'Edit Payment' : ('Record Payment — ' + esc(row.invoice_no))}</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
             <div className="modal-body">
               <div className="form-group"><label><i className="fas fa-coins"></i> Amount (max {money(due)})</label><input type="number" step="0.01" min="0" max={due} value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
-              <div className="form-group"><label><i className="fas fa-wallet"></i> Method</label><SearchableDropdown options={methodOpts} value={method} onChange={setMethod} placeholder="Method" /></div>
-              <div className="form-actions"><button type="button" className="btn btn-primary" onClick={submit}><i className="fas fa-check"></i> Record</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
+              <div className="form-group"><label><i className="fas fa-wallet"></i> Method / Source</label><SearchableDropdown options={methodOpts} value={method} onChange={setMethod} placeholder="Method" /></div>
+              
+              <div className="form-group" style={{marginTop:'12px'}}>
+                <label><i className="fas fa-camera"></i> Upload Proof of Payment (Screenshot/Receipt)</label>
+                <input type="file" className="file-input" accept="image/*" onChange={handleProofUpload} />
+                {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Compressing image...</small>}
+                {proof && (
+                  <div style={{marginTop:'8px', textAlign:'center'}}>
+                    <img src={proof} alt="Proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProof('')} style={{display:'block', margin:'4px auto 0', padding:'2px 8px', fontSize:'11px'}}><i className="fas fa-trash"></i> Remove Proof</button>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-actions" style={{marginTop:'15px'}}><button type="button" className="btn btn-primary" onClick={submit} disabled={uploading}><i className="fas fa-check"></i> {payment ? 'Update' : 'Record'}</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
             </div>
           </div>
         </div>
       );
     }
-    // per-customer schedule popup — every term with pay + wa reminder, full paid/remaining detail
-    function InstallmentPlanModal({ plan, canPay, today, onPay, onClose }) {
+
+    function InstallmentPlanModal({ plan, canPay, today, onPay, onClose, userId, onEditPayment, onDeletePayment }) {
+      const { data: payRes, mutate: mutatePays } = useSWR(plan ? `payments:sale:${plan.terms[0].sale_id}` : null, () => gsRun('getInstallmentPayments', plan.terms[0].sale_id));
+      const payments = payRes && payRes.success ? payRes.data : [];
+
+      const handlePrintPaymentReceipt = (p, plan) => {
+        printDoc(paymentReceiptHTML(p, plan), 'Payment Receipt ' + p.id, '80mm');
+      };
+
       return (
         <div className="modal-overlay" onClick={onClose}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'680px'}}>
@@ -6139,6 +6289,45 @@
                       </tr>
                     );
                   })}</tbody>
+                </table>
+              </div>
+
+              <div className="section-header" style={{marginTop:'25px', borderTop:'1px solid rgba(255,255,255,0.05)', paddingTop:'15px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                <h4 style={{color:'var(--navy-primary)', margin:0}}><i className="fas fa-history"></i> Payment History Ledger</h4>
+              </div>
+              <div className="about-table-wrapper" style={{marginTop:'10px'}}>
+                <table className="about-roles-table">
+                  <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Proof</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {payments.length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No payments recorded yet.</td></tr>}
+                    {payments.map(p => (
+                      <tr key={p.id}>
+                        <td>{fmtDate(p.created)}</td>
+                        <td>{money(p.amount)}</td>
+                        <td><span className="status-badge" style={{background:'rgba(255,255,255,0.05)', color:'#fff'}}>{p.method.toUpperCase()}</span></td>
+                        <td>
+                          {p.proof_url ? (
+                            <button className="btn btn-secondary btn-sm" style={{padding:'2px 8px', fontSize:'11px'}} onClick={() => {
+                              Swal.fire({
+                                title: 'Payment Proof',
+                                imageUrl: p.proof_url,
+                                imageAlt: 'Proof of payment',
+                                confirmButtonText: 'Close',
+                                confirmButtonColor: 'var(--navy-primary)'
+                              });
+                            }}><i className="fas fa-image"></i> View Proof</button>
+                          ) : <span style={{color:'#778'}}>—</span>}
+                        </td>
+                        <td>
+                          <div style={{display:'flex', gap:'6px'}}>
+                            <button className="action-icon" style={{color:'var(--warning)'}} title="Print Receipt" onClick={() => handlePrintPaymentReceipt(p, plan)}><i className="fas fa-print"></i></button>
+                            <button className="action-icon" style={{color:'var(--navy-accent)'}} title="Edit Payment" onClick={() => onEditPayment(p)}><i className="fas fa-edit"></i></button>
+                            <button className="action-icon" style={{color:'#b91c1c'}} title="Delete Payment" onClick={() => onDeletePayment(p.id)}><i className="fas fa-trash"></i></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
               </div>
             </div>
