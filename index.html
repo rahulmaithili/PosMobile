@@ -4401,18 +4401,18 @@
                   )}
                 </div>
 
-                <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
-                  <div className="form-group" style={{margin:0, padding:'6px', background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'6px', display:'flex', flexDirection:'column', justifyContent:'center'}}>
-                    <span style={{fontSize:'12px', color:'rgba(255,255,255,0.5)', display:'block'}}>Recalculated Bill Total</span>
-                    <span style={{fontSize:'18px', fontWeight:'800', color:'var(--navy-accent)', display:'block', marginTop:'4px'}}>{money(totalAmount)}</span>
+                <div className="ins-summary" style={{gridTemplateColumns:'1fr 1fr', gap:'12px', marginTop:'14px', marginBottom:'14px'}}>
+                  <div className="ins-card">
+                    <span>Recalculated Bill Total</span>
+                    <b style={{color:'var(--navy-accent)', fontSize:'18px'}}>{money(totalAmount)}</b>
                   </div>
-                  <div className="form-group" style={{margin:0, padding:'6px', background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'6px', display:'flex', flexDirection:'column', justifyContent:'center'}}>
-                    <span style={{fontSize:'12px', color:'rgba(255,255,255,0.5)', display:'block'}}>New Remaining Dues</span>
-                    <span style={{fontSize:'18px', fontWeight:'800', color: (totalAmount - purchase.amount_paid) > 0 ? '#c5221f' : '#2e7d32', display:'block', marginTop:'4px'}}>{money(Math.max(0, totalAmount - purchase.amount_paid))}</span>
+                  <div className="ins-card">
+                    <span>New Remaining Dues</span>
+                    <b style={{color: (totalAmount - purchase.amount_paid) > 0 ? '#c5221f' : '#2e7d32', fontSize:'18px'}}>{money(Math.max(0, totalAmount - purchase.amount_paid))}</b>
                   </div>
                 </div>
 
-                <div className="form-group" style={{marginTop:'12px'}}><label><i className="fas fa-sticky-note"></i> Notes</label><textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Additional notes…" style={{width:'100%', padding:'8px', borderRadius:'6px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', color:'#fff', resize:'vertical'}} /></div>
+                <div className="form-group" style={{marginTop:'12px'}}><label><i className="fas fa-sticky-note"></i> Notes</label><textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Additional notes…" style={{width:'100%', padding:'8px', borderRadius:'6px', background:'var(--input-bg)', border:'1px solid var(--border-color)', color:'var(--text-color)', resize:'vertical'}} /></div>
 
                 <div className="form-group" style={{marginTop:'12px'}}>
                   <label><i className="fas fa-camera"></i> Upload Bill / Invoice Proof (Screenshot/Receipt/PDF)</label>
@@ -6426,6 +6426,7 @@
 
     function RojnamchaView({ userId, role, perms }) {
       const [date, setDate] = useState(todayStr());
+      const [subTab, setSubTab] = useState('sales');
       const { data: res, error, mutate } = useSWR(date ? `rojnamcha:${date}` : null, () => gsRun('getRojnamcha', date, userId), { revalidateOnFocus: false });
       const d = res && res.success ? res.data : null;
       
@@ -6436,94 +6437,203 @@
 
       const printRojnamcha = () => {
         if (!d) return;
+        
+        const buildTable = (title, headers, rows) => {
+          if (!rows || rows.length === 0) return '';
+          return `
+            <div style="margin-top:20px;">
+              <h3 style="margin:0 0 8px;font-size:13px;color:#1e3a8a;border-bottom:1px solid #1e3a8a;padding-bottom:3px;text-transform:uppercase;">${title}</h3>
+              <table style="width:100%;border-collapse:collapse;margin-bottom:15px;font-size:11px;">
+                <thead>
+                  <tr style="background:#f3f4f6;">
+                    ${headers.map(h => `<th style="border:1px solid #ddd;padding:6px;text-align:left;font-weight:bold;">${h}</th>`).join('')}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows.map(r => `
+                    <tr>
+                      ${r.map((val, idx) => `<td style="border:1px solid #ddd;padding:5px;${idx === r.length - 1 ? 'text-align:right;font-weight:bold;' : ''}">${val}</td>`).join('')}
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        };
+
+        const salesRows = (d.sales.list || []).map(r => [
+          `#${r.invoice_no}`,
+          esc(r.customer_name),
+          r.method.toUpperCase(),
+          `${currency}${r.discount.toFixed(2)}`,
+          `${currency}${r.total.toFixed(2)}`
+        ]);
+
+        const repairsRows = (d.repairs.list || []).map(r => [
+          `#${r.id}`,
+          esc(r.customer_name),
+          `#${r.repair_id}`,
+          r.method.toUpperCase(),
+          `${currency}${r.amount.toFixed(2)}`
+        ]);
+
+        const installmentsRows = (d.installments.list || []).map(r => [
+          `#${r.id}`,
+          esc(r.customer_name),
+          `#${r.sale_id}`,
+          r.method.toUpperCase(),
+          `${currency}${r.amount.toFixed(2)}`
+        ]);
+
+        const supplierPaymentsRows = (d.supplierPayments.list || []).map(r => [
+          `#${r.id}`,
+          esc(r.supplier_name),
+          `#${r.invoice_no}`,
+          r.method.toUpperCase(),
+          `${currency}${r.amount.toFixed(2)}`
+        ]);
+
+        const expensesRows = (d.expenses.list || []).map(r => [
+          `#${r.id}`,
+          esc(r.category),
+          esc(r.notes || '—'),
+          r.method.toUpperCase(),
+          `${currency}${r.amount.toFixed(2)}`
+        ]);
+
+        const usedRows = (d.usedSpend.list || []).map(r => [
+          `#${r.id}`,
+          esc(r.phone_name),
+          esc(r.imei || '—'),
+          r.method.toUpperCase(),
+          `${currency}${r.amount.toFixed(2)}`
+        ]);
+
         const printHtml = `
           <html>
           <head>
-            <title>Rojnamcha Ledger — ${date}</title>
+            <title>Rojnamcha Daily Ledger — ${fmtDay(date)}</title>
             <style>
-              body { font-family: 'Courier New', Courier, monospace; color: #000; padding: 20px; line-height: 1.4; font-size: 14px; }
-              .ctr { text-align: center; }
-              .bold { font-weight: bold; }
-              .title { font-size: 20px; font-weight: bold; margin-bottom: 5px; }
-              .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
-              table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-              td { padding: 4px 0; font-size: 14px; }
+              body { font-family: Arial, sans-serif; color: #333; padding: 30px; line-height: 1.4; font-size: 12px; }
+              .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 20px; }
+              .shop-title { font-size: 20px; font-weight: bold; margin: 0; }
+              .bill-title { font-size: 18px; font-weight: bold; margin: 0; color: #1e3a8a; }
+              .divider { border-bottom: 1px dashed #ccc; margin: 15px 0; }
+              .summary-box { display: flex; justify-content: space-between; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 15px; margin-top: 15px; }
+              .summary-col { text-align: center; flex: 1; }
+              .summary-col span { display: block; font-size: 10px; color: #6b7280; margin-bottom: 4px; }
+              .summary-col b { font-size: 14px; color: #111827; }
               .right { text-align: right; }
-              .indent { padding-left: 20px; color: #444; }
-              .total-row { font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; }
+              .bold { font-weight: bold; }
             </style>
           </head>
           <body>
-            <div class="ctr title">${esc(shop.name || 'Mobile POS')}</div>
-            <div class="ctr">DAILY ROJNAMCHA / LEDGER</div>
-            <div class="ctr bold">Date: ${fmtDate(date)}</div>
-            <div class="divider"></div>
-            
-            <table>
-              <tr><td>Opening Cash (Drawer Till):</td><td class="right bold">${currency}${Number(d.till.opening).toFixed(2)}</td></tr>
-            </table>
+            <div class="header">
+              <div>
+                <p class="shop-title">${esc(shop.name || 'Mobile POS')}</p>
+                <p style="margin:4px 0;font-size:12px;color:#555">${esc(shop.address || '')}</p>
+                <p style="margin:4px 0;font-size:12px;color:#555">Phone: ${esc(shop.phone || '')}</p>
+              </div>
+              <div style="text-align:right">
+                <p class="bill-title">DAILY ROJNAMCHA (ACCOUNTS STATEMENT)</p>
+                <p style="margin:4px 0;font-size:13px"><b>Statement Date:</b> ${fmtDay(date)}</p>
+                <p style="margin:4px 0;font-size:11px;color:#666">Printed on: ${new Date().toLocaleString()}</p>
+              </div>
+            </div>
 
-            <div class="bold" style="margin-top:15px; text-decoration: underline;">INFLOWS (KAMAAI / RECEIPTS)</div>
-            <table>
-              <tr><td>POS Sales:</td><td class="right">${currency}${Number(d.sales.total).toFixed(2)}</td></tr>
-              <tr><td class="indent">· Cash:</td><td class="right">${currency}${Number(d.sales.breakdown.cash || 0).toFixed(2)}</td></tr>
-              <tr><td class="indent">· Card:</td><td class="right">${currency}${Number(d.sales.breakdown.card || 0).toFixed(2)}</td></tr>
-              <tr><td class="indent">· GPay:</td><td class="right">${currency}${Number(d.sales.breakdown.gpay || 0).toFixed(2)}</td></tr>
-              <tr><td class="indent">· PhonePe:</td><td class="right">${currency}${Number(d.sales.breakdown.phonepe || 0).toFixed(2)}</td></tr>
-              <tr><td class="indent">· Bank Transfer:</td><td class="right">${currency}${Number(d.sales.breakdown.bank_transfer || 0).toFixed(2)}</td></tr>
-              
-              <tr><td style="padding-top:8px">Repairs Income:</td><td class="right" style="padding-top:8px">${currency}${Number(d.repairs.total).toFixed(2)}</td></tr>
-              <tr><td class="indent">· Cash:</td><td class="right">${currency}${Number(d.repairs.breakdown.cash || 0).toFixed(2)}</td></tr>
-              <tr><td class="indent">· GPay:</td><td class="right">${currency}${Number(d.repairs.breakdown.gpay || 0).toFixed(2)}</td></tr>
-              <tr><td class="indent">· PhonePe:</td><td class="right">${currency}${Number(d.repairs.breakdown.phonepe || 0).toFixed(2)}</td></tr>
-              
-              <tr><td style="padding-top:8px">Customer EMI/Dues Installments:</td><td class="right" style="padding-top:8px">${currency}${Number(d.installments.total).toFixed(2)}</td></tr>
-              
-              <tr class="total-row">
-                <td style="padding:6px 0">TOTAL INFLOWS:</td>
-                <td class="right" style="padding:6px 0">${currency}${Number(d.sales.total + d.repairs.total + d.installments.total).toFixed(2)}</td>
-              </tr>
-            </table>
-
-            <div class="bold" style="margin-top:20px; text-decoration: underline;">OUTFLOWS (KHARCHE / PAYMENTS)</div>
-            <table>
-              <tr><td>Supplier Purchases (PO Paid):</td><td class="right">${currency}${Number(d.supplierPayments.total).toFixed(2)}</td></tr>
-              <tr><td class="indent">· Cash:</td><td class="right">${currency}${Number(d.supplierPayments.breakdown.cash || 0).toFixed(2)}</td></tr>
-              <tr><td class="indent">· GPay/PhonePe:</td><td class="right">${currency}${Number((d.supplierPayments.breakdown.gpay || 0) + (d.supplierPayments.breakdown.phonepe || 0)).toFixed(2)}</td></tr>
-              <tr><td class="indent">· Bank Transfer:</td><td class="right">${currency}${Number(d.supplierPayments.breakdown.bank_transfer || 0).toFixed(2)}</td></tr>
-              
-              <tr><td style="padding-top:8px">General Expenses:</td><td class="right" style="padding-top:8px">${currency}${Number(d.expenses.total).toFixed(2)}</td></tr>
-              <tr><td style="padding-top:8px">Used Phone Buy Spend:</td><td class="right" style="padding-top:8px">${currency}${Number(d.usedSpend.total).toFixed(2)}</td></tr>
-              
-              <tr class="total-row">
-                <td style="padding:6px 0">TOTAL OUTFLOWS:</td>
-                <td class="right" style="padding:6px 0">${currency}${Number(d.supplierPayments.total + d.expenses.total + d.usedSpend.total).toFixed(2)}</td>
-              </tr>
-            </table>
+            <div class="summary-box">
+              <div class="summary-col"><span>Opening Drawer Balance</span><b>${currency}${Number(d.till.opening).toFixed(2)}</b></div>
+              <div class="summary-col"><span>Today's Receipts (Inflow)</span><b style="color:#2e7d32">+${currency}${Number(d.sales.total + d.repairs.total + d.installments.total).toFixed(2)}</b></div>
+              <div class="summary-col"><span>Today's Outflows (Payments)</span><b style="color:#c5221f">-${currency}${Number(d.supplierPayments.total + d.expenses.total + d.usedSpend.total).toFixed(2)}</b></div>
+              <div class="summary-col"><span>Expected Closing Cash</span><b style="color:#1e3a8a">${currency}${Number(d.till.opening + (d.sales.total + d.repairs.total + d.installments.total) - (d.supplierPayments.total + d.expenses.total + d.usedSpend.total)).toFixed(2)}</b></div>
+            </div>
 
             <div class="divider"></div>
+
+            <h2 style="font-size:13px;color:#111;margin:15px 0 5px;text-transform:uppercase;letter-spacing:0.5px;">1. Cash Flow & Revenue Summary</h2>
+            <table style="width:100%;border-collapse:collapse;margin:10px 0 20px;font-size:11px;">
+              <thead>
+                <tr style="background:#f3f4f6;border-bottom:1px solid #ddd;">
+                  <th style="padding:6px;text-align:left;">Category</th>
+                  <th style="padding:6px;text-align:right;">Cash</th>
+                  <th style="padding:6px;text-align:right;">UPI / Online</th>
+                  <th style="padding:6px;text-align:right;">Card / Bank</th>
+                  <th style="padding:6px;text-align:right;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #eee;">
+                  <td style="padding:6px;font-weight:bold;">POS Sales Revenue</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number(d.sales.breakdown.cash || 0).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number((d.sales.breakdown.gpay || 0) + (d.sales.breakdown.phonepe || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number((d.sales.breakdown.card || 0) + (d.sales.breakdown.bank_transfer || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;font-weight:bold;">${currency}${Number(d.sales.total).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #eee;">
+                  <td style="padding:6px;font-weight:bold;">Repairs Income</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number(d.repairs.breakdown.cash || 0).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number((d.repairs.breakdown.gpay || 0) + (d.repairs.breakdown.phonepe || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number((d.repairs.breakdown.card || 0) + (d.repairs.breakdown.bank_transfer || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;font-weight:bold;">${currency}${Number(d.repairs.total).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #eee;">
+                  <td style="padding:6px;font-weight:bold;">EMI / Installments</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number(d.installments.breakdown.cash || 0).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number((d.installments.breakdown.gpay || 0) + (d.installments.breakdown.phonepe || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;">${currency}${Number((d.installments.breakdown.card || 0) + (d.installments.breakdown.bank_transfer || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;font-weight:bold;">${currency}${Number(d.installments.total).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #eee;">
+                  <td style="padding:6px;font-weight:bold;">Supplier Payments (Outflow)</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number(d.supplierPayments.breakdown.cash || 0).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number((d.supplierPayments.breakdown.gpay || 0) + (d.supplierPayments.breakdown.phonepe || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number((d.supplierPayments.breakdown.card || 0) + (d.supplierPayments.breakdown.bank_transfer || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;font-weight:bold;color:#c5221f;">${currency}${Number(d.supplierPayments.total).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #eee;">
+                  <td style="padding:6px;font-weight:bold;">Shop Expenses (Outflow)</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number(d.expenses.breakdown.cash || 0).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number((d.expenses.breakdown.gpay || 0) + (d.expenses.breakdown.phonepe || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number((d.expenses.breakdown.card || 0) + (d.expenses.breakdown.bank_transfer || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;font-weight:bold;color:#c5221f;">${currency}${Number(d.expenses.total).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #eee;">
+                  <td style="padding:6px;font-weight:bold;">Used Phone Spend (Outflow)</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number(d.usedSpend.breakdown.cash || 0).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number((d.usedSpend.breakdown.gpay || 0) + (d.usedSpend.phonepe || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;color:#c5221f;">${currency}${Number((d.usedSpend.breakdown.card || 0) + (d.usedSpend.bank_transfer || 0)).toFixed(2)}</td>
+                  <td style="padding:6px;text-align:right;font-weight:bold;color:#c5221f;">${currency}${Number(d.usedSpend.total).toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h2 style="font-size:13px;color:#111;margin:25px 0 5px;text-transform:uppercase;letter-spacing:0.5px;">2. Itemized Transactions (Full details)</h2>
+            <div class="divider" style="margin:5px 0 15px;"></div>
             
-            <table>
-              <tr><td>Opening Drawer Cash:</td><td class="right">${currency}${Number(d.till.opening).toFixed(2)}</td></tr>
-              <tr><td>(+) Today's Cash Inflow:</td><td class="right">${currency}${Number((d.sales.breakdown.cash || 0) + (d.repairs.breakdown.cash || 0) + (d.installments.breakdown.cash || d.installments.total)).toFixed(2)}</td></tr>
-              <tr><td>(−) Today's Cash Outflow:</td><td class="right">${currency}${Number((d.supplierPayments.breakdown.cash || 0) + (d.expenses.breakdown.cash || d.expenses.total) + (d.usedSpend.breakdown.cash || d.usedSpend.total)).toFixed(2)}</td></tr>
-              <tr class="total-row" style="font-size:16px">
-                <td>CLOSING EXPECTED CASH:</td>
-                <td class="right">${currency}${Number(d.till.opening + ((d.sales.breakdown.cash || 0) + (d.repairs.breakdown.cash || 0) + (d.installments.breakdown.cash || d.installments.total)) - ((d.supplierPayments.breakdown.cash || 0) + (d.expenses.breakdown.cash || d.expenses.total) + (d.usedSpend.breakdown.cash || d.usedSpend.total))).toFixed(2)}</td>
-              </tr>
-            </table>
+            ${buildTable("Today's POS Sales", ['Invoice No', 'Customer Name', 'Method', 'Discount', 'Total'], salesRows)}
+            ${buildTable("Today's Repair Income", ['Receipt ID', 'Customer Name', 'Repair ID', 'Method', 'Amount'], repairsRows)}
+            ${buildTable("Today's EMI / Dues Installments", ['Receipt ID', 'Customer Name', 'Sale Plan ID', 'Method', 'Amount'], installmentsRows)}
+            ${buildTable("Today's Supplier Dues Paid", ['Payment ID', 'Supplier Name', 'Bill Invoice', 'Method', 'Amount'], supplierPaymentsRows)}
+            ${buildTable("Today's General Shop Expenses", ['Expense ID', 'Category', 'Notes / Details', 'Method', 'Amount'], expensesRows)}
+            ${buildTable("Today's Used Phone Purchases", ['Purchase ID', 'Phone Details', 'IMEI Number', 'Method', 'Price'], usedRows)}
 
-            <table style="margin-top:10px">
-              <tr><td>Discounts Given Today:</td><td class="right bold" style="color:var(--danger)">${currency}${Number(d.sales.discount).toFixed(2)}</td></tr>
-            </table>
-
-            <div class="divider" style="margin-top:30px"></div>
-            <div class="ctr" style="font-size:11px;color:#666">End of Daily Ledger</div>
+            <div class="footer" style="text-align:center;margin-top:35px;font-size:10px;color:#777;border-top:1px solid #eee;padding-top:10px;">
+              <p>Certified daily account balance report. For internal auditing use only.</p>
+            </div>
           </body>
           </html>
         `;
-        printDoc(printHtml, 'Rojnamcha-' + date, '80mm');
+        printDoc(printHtml, 'Rojnamcha-Report-' + date, 'a4');
       };
+
+      const subTabs = [
+        { key:'sales', label:'Sales', count: (d && d.sales.list || []).length },
+        { key:'repairs', label:'Repairs', count: (d && d.repairs.list || []).length },
+        { key:'installments', label:'Installments', count: (d && d.installments.list || []).length },
+        { key:'supplierPayments', label:'Supplier Paid', count: (d && d.supplierPayments.list || []).length },
+        { key:'expenses', label:'Expenses', count: (d && d.expenses.list || []).length },
+        { key:'usedSpend', label:'Used Phones', count: (d && d.usedSpend.list || []).length }
+      ];
 
       return (
         <div className="data-section">
@@ -6531,79 +6641,182 @@
             <h2 style={{display:'flex', alignItems:'center', gap:'8px', color:'var(--navy-primary)', margin:0}}><i className="fas fa-book"></i> Rojnamcha (Daily Ledger)</h2>
             <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
               <div className="form-group" style={{margin:0}}><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-              {d && <button className="btn btn-secondary" onClick={printRojnamcha} style={{padding:'8px 14px', borderRadius:'6px'}}><i className="fas fa-print"></i> Print Rojnamcha</button>}
+              {d && <button className="btn btn-primary" onClick={printRojnamcha} style={{padding:'8px 14px', borderRadius:'6px'}}><i className="fas fa-print"></i> Print A4 Ledger</button>}
             </div>
           </div>
 
           {!d ? (
             <TableSkeleton rows={8} columns={5} />
           ) : (
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
-              {/* Inflows Card */}
-              <div className="settings-card" style={{padding:'20px'}}>
-                <h3 style={{color:'#2e7d32', borderBottom:'2px solid rgba(46, 125, 50, 0.1)', paddingBottom:'8px', display:'flex', justifyContent:'space-between'}}>
-                  <span><i className="fas fa-arrow-trend-up"></i> Today's Inflows (Receipts)</span>
-                  <span>{money(d.sales.total + d.repairs.total + d.installments.total)}</span>
-                </h3>
-                <div style={{marginTop:'12px'}}>
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0'}}><span>POS Sales Revenue</span><span>{money(d.sales.total)}</span></div>
-                  <div style={{paddingLeft:'15px', fontSize:'13px', color:'rgba(255,255,255,0.6)'}}>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Sales</span><span>{money(d.sales.breakdown.cash || 0)}</span></div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>GPay Sales</span><span>{money(d.sales.breakdown.gpay || 0)}</span></div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>PhonePe Sales</span><span>{money(d.sales.breakdown.phonepe || 0)}</span></div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Card / Bank</span><span>{money((d.sales.breakdown.card || 0) + (d.sales.breakdown.bank_transfer || 0))}</span></div>
-                  </div>
-
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Repairs Income</span><span>{money(d.repairs.total)}</span></div>
-                  <div style={{paddingLeft:'15px', fontSize:'13px', color:'rgba(255,255,255,0.6)'}}>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Repairs</span><span>{money(d.repairs.breakdown.cash || 0)}</span></div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>GPay Repairs</span><span>{money(d.repairs.breakdown.gpay || 0)}</span></div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>PhonePe Repairs</span><span>{money(d.repairs.breakdown.phonepe || 0)}</span></div>
-                  </div>
-
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Customer EMI / Dues Payments</span><span>{money(d.installments.total)}</span></div>
-                </div>
-              </div>
-
-              {/* Outflows Card */}
-              <div className="settings-card" style={{padding:'20px'}}>
-                <h3 style={{color:'#c5221f', borderBottom:'2px solid rgba(197, 34, 31, 0.1)', paddingBottom:'8px', display:'flex', justifyContent:'space-between'}}>
-                  <span><i className="fas fa-arrow-trend-down"></i> Today's Outflows (Payments)</span>
-                  <span>{money(d.supplierPayments.total + d.expenses.total + d.usedSpend.total)}</span>
-                </h3>
-                <div style={{marginTop:'12px'}}>
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0'}}><span>Supplier Dues & PO Paid</span><span>{money(d.supplierPayments.total)}</span></div>
-                  <div style={{paddingLeft:'15px', fontSize:'13px', color:'rgba(255,255,255,0.6)'}}>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Paid</span><span>{money(d.supplierPayments.breakdown.cash || 0)}</span></div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>UPI (GPay/PhonePe) Paid</span><span>{money((d.supplierPayments.breakdown.gpay || 0) + (d.supplierPayments.breakdown.phonepe || 0))}</span></div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Bank Transfer Paid</span><span>{money(d.supplierPayments.breakdown.bank_transfer || 0)}</span></div>
-                  </div>
-
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>General Shop Expenses</span><span>{money(d.expenses.total)}</span></div>
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Used Phones Spend</span><span>{money(d.usedSpend.total)}</span></div>
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px', color:'var(--warning)'}}><span>Total Supplier Purchases (PO Total Value)</span><span>{money(d.supplierPurchases.total)}</span></div>
-                </div>
-              </div>
-
+            <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
+              
               {/* Day Reconciliation Card */}
-              <div className="settings-card" style={{gridColumn:'1 / -1', padding:'20px'}}>
-                <h3 style={{color:'var(--navy-accent)', borderBottom:'2px solid rgba(0,0,0,0.1)', paddingBottom:'8px'}}><i className="fas fa-calculator"></i> Day Reconciliation (Daily Accounts Closing)</h3>
+              <div className="settings-card" style={{padding:'20px'}}>
+                <h3 style={{color:'var(--navy-accent)', borderBottom:'2px solid rgba(0,0,0,0.1)', paddingBottom:'8px', margin:0}}><i className="fas fa-calculator"></i> Day Reconciliation (Daily Accounts Closing)</h3>
                 
                 <div className="ins-summary" style={{gridTemplateColumns:'repeat(4, 1fr)', gap:'10px', marginTop:'14px'}}>
                   <div className="ins-card"><span>Opening Drawer Balance</span><b>{money(d.till.opening)}</b></div>
                   <div className="ins-card"><span>Today's Receipts (Inflow)</span><b style={{color:'#2e7d32'}}>+{money(d.sales.total + d.repairs.total + d.installments.total)}</b></div>
                   <div className="ins-card"><span>Today's Outflows</span><b style={{color:'#c5221f'}}>-{money(d.supplierPayments.total + d.expenses.total + d.usedSpend.total)}</b></div>
-                  <div className="ins-card" style={{background:'rgba(255,255,255,0.06)'}}><span>Expected Cash / Closing Bal</span><b style={{color:'var(--navy-accent)'}}>{money(d.till.opening + (d.sales.total + d.repairs.total + d.installments.total) - (d.supplierPayments.total + d.expenses.total + d.usedSpend.total))}</b></div>
+                  <div className="ins-card" style={{background:'var(--navy-accent-light)'}}><span>Expected Cash / Closing Bal</span><b style={{color:'var(--navy-accent)'}}>{money(d.till.opening + (d.sales.total + d.repairs.total + d.installments.total) - (d.supplierPayments.total + d.expenses.total + d.usedSpend.total))}</b></div>
                 </div>
 
-                <div style={{marginTop:'14px', padding:'10px', background:'rgba(255,255,255,0.02)', borderRadius:'6px', border:'1px dashed rgba(255,255,255,0.08)'}}>
-                  <div style={{display:'flex', justifyContent:'space-between', fontWeight:'600'}}>
-                    <span>Total Discounts Given Today:</span>
-                    <span style={{color:'var(--danger)'}}>{money(d.sales.discount)}</span>
+                <div style={{marginTop:'14px', padding:'10px', background:'rgba(255,255,255,0.02)', borderRadius:'6px', border:'1px dashed rgba(255,255,255,0.08)', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                  <div>
+                    <span style={{fontWeight:'600', fontSize:'13px'}}>Total Discounts Given Today:</span>
+                    <span style={{color:'var(--danger)', marginLeft:'8px', fontWeight:'700'}}>{money(d.sales.discount)}</span>
                   </div>
-                  <small style={{color:'rgba(255,255,255,0.5)', display:'block', marginTop:'4px'}}>Note: Discounts reduce your overall POS Sales revenue. The figures above are net POS Sales after discounts.</small>
+                  <small style={{color:'rgba(255,255,255,0.5)'}}>Discounts reduce POS Sales revenue. POS Sales total is net after discounts.</small>
                 </div>
               </div>
+
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
+                {/* Inflows Card */}
+                <div className="settings-card" style={{padding:'20px'}}>
+                  <h3 style={{color:'#2e7d32', borderBottom:'2px solid rgba(46, 125, 50, 0.1)', paddingBottom:'8px', display:'flex', justifyContent:'space-between', margin:0}}>
+                    <span><i className="fas fa-arrow-trend-up"></i> Today's Inflows (Receipts)</span>
+                    <span>{money(d.sales.total + d.repairs.total + d.installments.total)}</span>
+                  </h3>
+                  <div style={{marginTop:'12px'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0'}}><span>POS Sales Revenue</span><span>{money(d.sales.total)}</span></div>
+                    <div style={{paddingLeft:'15px', fontSize:'13px', color:'var(--text-secondary)'}}>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Sales</span><span>{money(d.sales.breakdown.cash || 0)}</span></div>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>GPay Sales</span><span>{money(d.sales.breakdown.gpay || 0)}</span></div>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>PhonePe Sales</span><span>{money(d.sales.breakdown.phonepe || 0)}</span></div>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Card / Bank</span><span>{money((d.sales.breakdown.card || 0) + (d.sales.breakdown.bank_transfer || 0))}</span></div>
+                    </div>
+
+                    <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Repairs Income</span><span>{money(d.repairs.total)}</span></div>
+                    <div style={{paddingLeft:'15px', fontSize:'13px', color:'var(--text-secondary)'}}>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Repairs</span><span>{money(d.repairs.breakdown.cash || 0)}</span></div>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>GPay Repairs</span><span>{money(d.repairs.breakdown.gpay || 0)}</span></div>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>PhonePe Repairs</span><span>{money(d.repairs.breakdown.phonepe || 0)}</span></div>
+                    </div>
+
+                    <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Customer EMI / Dues Payments</span><span>{money(d.installments.total)}</span></div>
+                  </div>
+                </div>
+
+                {/* Outflows Card */}
+                <div className="settings-card" style={{padding:'20px'}}>
+                  <h3 style={{color:'#c5221f', borderBottom:'2px solid rgba(197, 34, 31, 0.1)', paddingBottom:'8px', display:'flex', justifyContent:'space-between', margin:0}}>
+                    <span><i className="fas fa-arrow-trend-down"></i> Today's Outflows (Payments)</span>
+                    <span>{money(d.supplierPayments.total + d.expenses.total + d.usedSpend.total)}</span>
+                  </h3>
+                  <div style={{marginTop:'12px'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0'}}><span>Supplier Dues & PO Paid</span><span>{money(d.supplierPayments.total)}</span></div>
+                    <div style={{paddingLeft:'15px', fontSize:'13px', color:'var(--text-secondary)'}}>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Cash Paid</span><span>{money(d.supplierPayments.breakdown.cash || 0)}</span></div>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>UPI (GPay/PhonePe) Paid</span><span>{money((d.supplierPayments.breakdown.gpay || 0) + (d.supplierPayments.breakdown.phonepe || 0))}</span></div>
+                      <div style={{display:'flex', justifyContent:'space-between', padding:'3px 0'}}><span>Bank Transfer Paid</span><span>{money(d.supplierPayments.breakdown.bank_transfer || 0)}</span></div>
+                    </div>
+
+                    <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>General Shop Expenses</span><span>{money(d.expenses.total)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px'}}><span>Used Phones Spend</span><span>{money(d.usedSpend.total)}</span></div>
+                    <div style={{display:'flex', justifyContent:'space-between', fontWeight:'700', padding:'6px 0', marginTop:'10px', color:'var(--warning)'}}><span>Total Supplier Purchases (PO Total Value)</span><span>{money(d.supplierPurchases.total)}</span></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Itemized Details Lists */}
+              <div className="settings-card" style={{padding:'20px'}}>
+                <h3 style={{borderBottom:'1px solid var(--border-color)', paddingBottom:'10px', margin:0, display:'flex', alignItems:'center', gap:'8px'}}><i className="fas fa-list"></i> Itemized Ledger Details (Today's Transactions)</h3>
+                
+                <div style={{display:'flex', gap:'8px', overflowX:'auto', padding:'10px 0', borderBottom:'1px solid var(--border-color)'}}>
+                  {subTabs.map(t => (
+                    <button key={t.key} className={`btn btn-sm ${subTab === t.key ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab(t.key)} style={{borderRadius:'20px', padding:'4px 14px', display:'flex', gap:'6px', alignItems:'center', whiteSpace:'nowrap'}}>
+                      {t.label} <span style={{background:'rgba(0,0,0,0.1)', color:'var(--text-secondary)', padding:'1px 6px', borderRadius:'10px', fontSize:'10px'}}>{t.count}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="about-table-wrapper" style={{marginTop:'12px', maxHeight:'300px', overflowY:'auto'}}>
+                  {subTab === 'sales' && (
+                    <table className="about-roles-table">
+                      <thead>
+                        <tr><th>Invoice No</th><th>Customer</th><th>Method</th><th>Discount</th><th>Total</th></tr>
+                      </thead>
+                      <tbody>
+                        {(d.sales.list || []).length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No sales recorded today.</td></tr>}
+                        {(d.sales.list || []).map(r => (
+                          <tr key={r.id}><td>#{r.invoice_no}</td><td>{esc(r.customer_name)}</td><td><span className="status-badge" style={{background:'rgba(255,255,255,0.05)'}}>{r.method.toUpperCase()}</span></td><td>{money(r.discount)}</td><td style={{fontWeight:'700'}}>{money(r.total)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {subTab === 'repairs' && (
+                    <table className="about-roles-table">
+                      <thead>
+                        <tr><th>Receipt No</th><th>Customer</th><th>Repair ID</th><th>Method</th><th>Amount</th></tr>
+                      </thead>
+                      <tbody>
+                        {(d.repairs.list || []).length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No repairs recorded today.</td></tr>}
+                        {(d.repairs.list || []).map(r => (
+                          <tr key={r.id}><td>#{r.id}</td><td>{esc(r.customer_name)}</td><td>#{r.repair_id}</td><td><span className="status-badge" style={{background:'rgba(255,255,255,0.05)'}}>{r.method.toUpperCase()}</span></td><td style={{fontWeight:'700'}}>{money(r.amount)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {subTab === 'installments' && (
+                    <table className="about-roles-table">
+                      <thead>
+                        <tr><th>Receipt No</th><th>Customer</th><th>Sale Plan ID</th><th>Method</th><th>Amount</th></tr>
+                      </thead>
+                      <tbody>
+                        {(d.installments.list || []).length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No installment payments received today.</td></tr>}
+                        {(d.installments.list || []).map(r => (
+                          <tr key={r.id}><td>#{r.id}</td><td>{esc(r.customer_name)}</td><td>#{r.sale_id}</td><td><span className="status-badge" style={{background:'rgba(255,255,255,0.05)'}}>{r.method.toUpperCase()}</span></td><td style={{fontWeight:'700'}}>{money(r.amount)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {subTab === 'supplierPayments' && (
+                    <table className="about-roles-table">
+                      <thead>
+                        <tr><th>Payment ID</th><th>Supplier</th><th>Bill Invoice</th><th>Method</th><th>Amount</th></tr>
+                      </thead>
+                      <tbody>
+                        {(d.supplierPayments.list || []).length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No supplier dues paid today.</td></tr>}
+                        {(d.supplierPayments.list || []).map(r => (
+                          <tr key={r.id}><td>#{r.id}</td><td>{esc(r.supplier_name)}</td><td>#{r.invoice_no}</td><td><span className="status-badge" style={{background:'rgba(255,255,255,0.05)'}}>{r.method.toUpperCase()}</span></td><td style={{fontWeight:'700'}}>{money(r.amount)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {subTab === 'expenses' && (
+                    <table className="about-roles-table">
+                      <thead>
+                        <tr><th>Expense ID</th><th>Category</th><th>Notes / Details</th><th>Method</th><th>Amount</th></tr>
+                      </thead>
+                      <tbody>
+                        {(d.expenses.list || []).length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No shop expenses recorded today.</td></tr>}
+                        {(d.expenses.list || []).map(r => (
+                          <tr key={r.id}><td>#{r.id}</td><td><span className="status-badge">{esc(r.category)}</span></td><td>{esc(r.notes || '—')}</td><td><span className="status-badge" style={{background:'rgba(255,255,255,0.05)'}}>{r.method.toUpperCase()}</span></td><td style={{fontWeight:'700'}}>{money(r.amount)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {subTab === 'usedSpend' && (
+                    <table className="about-roles-table">
+                      <thead>
+                        <tr><th>Purchase ID</th><th>Phone Details</th><th>IMEI Number</th><th>Method</th><th>Price</th></tr>
+                      </thead>
+                      <tbody>
+                        {(d.usedSpend.list || []).length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No used phones purchased today.</td></tr>}
+                        {(d.usedSpend.list || []).map(r => (
+                          <tr key={r.id}><td>#{r.id}</td><td>{esc(r.phone_name)}</td><td>{esc(r.imei || '—')}</td><td><span className="status-badge" style={{background:'rgba(255,255,255,0.05)'}}>{r.method.toUpperCase()}</span></td><td style={{fontWeight:'700'}}>{money(r.amount)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
             </div>
           )}
         </div>

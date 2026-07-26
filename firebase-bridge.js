@@ -3876,9 +3876,23 @@
         return String(val).slice(0, 10);
       };
 
+      // Mappings
+      const customersMap = {};
+      try {
+        const custSnap = await db.collection('customers').get();
+        custSnap.forEach(d => { customersMap[d.data().id] = d.data().name; });
+      } catch(e) {}
+
+      const suppliersMap = {};
+      try {
+        const supSnap = await db.collection('suppliers').get();
+        supSnap.forEach(d => { suppliersMap[d.data().id] = d.data().name; });
+      } catch(e) {}
+
       // 1. Sales (revenue inflow)
       let totalSales = 0, totalDiscount = 0;
       const salesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      const salesList = [];
       try {
         const salesSnap = await db.collection('sales').get();
         salesSnap.forEach(d => {
@@ -3889,6 +3903,14 @@
             totalDiscount = round2(totalDiscount + Number(s.discount || 0));
             const method = (s.payment_method || 'cash').toLowerCase();
             salesByMethod[method] = round2((salesByMethod[method] || 0) + Number(s.total || 0));
+            salesList.push({
+              id: s.id,
+              invoice_no: s.invoice_no,
+              customer_name: customersMap[s.customer_id] || s.customer_name || 'Walk-in Customer',
+              total: Number(s.total || 0),
+              discount: Number(s.discount || 0),
+              method: s.payment_method || 'cash'
+            });
           }
         });
       } catch(e) { console.warn('Rojnamcha sales err:', e.message); }
@@ -3896,6 +3918,7 @@
       // 2. Repair payments received (from 'payments' collection ref_type='repair')
       let totalRepairs = 0;
       const repairsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      const repairsList = [];
       try {
         const repPaySnap = await db.collection('payments').where('ref_type', '==', 'repair').get();
         repPaySnap.forEach(d => {
@@ -3905,6 +3928,13 @@
             totalRepairs = round2(totalRepairs + Number(p.amount || 0));
             const method = (p.method || 'cash').toLowerCase();
             repairsByMethod[method] = round2((repairsByMethod[method] || 0) + Number(p.amount || 0));
+            repairsList.push({
+              id: p.id,
+              customer_name: customersMap[p.customer_id] || 'Customer',
+              amount: Number(p.amount || 0),
+              method: p.method || 'cash',
+              repair_id: p.ref_id
+            });
           }
         });
       } catch(e) { console.warn('Rojnamcha repairs err:', e.message); }
@@ -3912,6 +3942,7 @@
       // 3. Sale due / EMI payments received (from 'payments' collection ref_type='sale')
       let totalInstallments = 0;
       const installmentsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      const installmentsList = [];
       try {
         const salePaySnap = await db.collection('payments').where('ref_type', '==', 'sale').get();
         salePaySnap.forEach(d => {
@@ -3921,6 +3952,13 @@
             totalInstallments = round2(totalInstallments + Number(p.amount || 0));
             const method = (p.method || 'cash').toLowerCase();
             installmentsByMethod[method] = round2((installmentsByMethod[method] || 0) + Number(p.amount || 0));
+            installmentsList.push({
+              id: p.id,
+              customer_name: customersMap[p.customer_id] || 'Customer',
+              amount: Number(p.amount || 0),
+              method: p.method || 'cash',
+              sale_id: p.ref_id
+            });
           }
         });
       } catch(e) { console.warn('Rojnamcha installments err:', e.message); }
@@ -3928,6 +3966,7 @@
       // 4. Used phones purchase spend (outflow)
       let totalUsedSpend = 0;
       const usedSpendByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      const usedSpendList = [];
       try {
         const usedSnap = await db.collection('used_phones').get();
         usedSnap.forEach(d => {
@@ -3937,6 +3976,13 @@
             totalUsedSpend = round2(totalUsedSpend + Number(u.purchase_price || 0));
             const method = (u.payment_method || 'cash').toLowerCase();
             usedSpendByMethod[method] = round2((usedSpendByMethod[method] || 0) + Number(u.purchase_price || 0));
+            usedSpendList.push({
+              id: u.id,
+              phone_name: `${u.brand || ''} ${u.model || ''}`,
+              imei: u.imei || '',
+              amount: Number(u.purchase_price || 0),
+              method: u.payment_method || 'cash'
+            });
           }
         });
       } catch(e) { console.warn('Rojnamcha used phones err:', e.message); }
@@ -3944,6 +3990,7 @@
       // 5. General expenses (outflow)
       let totalExpenses = 0;
       const expensesByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      const expensesList = [];
       try {
         const expensesSnap = await db.collection('expenses').get();
         expensesSnap.forEach(d => {
@@ -3953,6 +4000,13 @@
             totalExpenses = round2(totalExpenses + Number(e.amount || 0));
             const method = (e.payment_method || 'cash').toLowerCase();
             expensesByMethod[method] = round2((expensesByMethod[method] || 0) + Number(e.amount || 0));
+            expensesList.push({
+              id: e.id,
+              category: e.category,
+              amount: Number(e.amount || 0),
+              method: e.payment_method || 'cash',
+              notes: e.notes || ''
+            });
           }
         });
       } catch(e) { console.warn('Rojnamcha expenses err:', e.message); }
@@ -3973,8 +4027,13 @@
       // 7. Supplier payments made today (outflow)
       let totalSupplierPayments = 0;
       const supplierPaymentsByMethod = { cash: 0, card: 0, bank_transfer: 0, gpay: 0, phonepe: 0, other: 0 };
+      const supplierPaymentsList = [];
       try {
         const supplierPaymentsSnap = await db.collection('supplier_payments').get();
+        const purSnap = await db.collection('supplier_purchases').get();
+        const purMap = {};
+        purSnap.forEach(d => { purMap[d.data().id] = d.data(); });
+
         supplierPaymentsSnap.forEach(d => {
           const sp = d.data();
           if (sp.deleted) return;
@@ -3982,6 +4041,14 @@
             totalSupplierPayments = round2(totalSupplierPayments + Number(sp.amount || 0));
             const method = (sp.method || 'cash').toLowerCase();
             supplierPaymentsByMethod[method] = round2((supplierPaymentsByMethod[method] || 0) + Number(sp.amount || 0));
+            const pur = purMap[sp.purchase_id] || {};
+            supplierPaymentsList.push({
+              id: sp.id,
+              supplier_name: suppliersMap[pur.supplier_id] || 'Supplier',
+              invoice_no: pur.invoice_no || '—',
+              amount: Number(sp.amount || 0),
+              method: sp.method || 'cash'
+            });
           }
         });
       } catch(e) { console.warn('Rojnamcha supplier payments err:', e.message); }
@@ -4005,13 +4072,13 @@
       } catch(e) { console.warn('Rojnamcha drawer err:', e.message); }
 
       return ok('', { data: {
-        sales: { total: totalSales, discount: totalDiscount, breakdown: salesByMethod },
-        repairs: { total: totalRepairs, breakdown: repairsByMethod },
-        expenses: { total: totalExpenses, breakdown: expensesByMethod },
+        sales: { total: totalSales, discount: totalDiscount, breakdown: salesByMethod, list: salesList },
+        repairs: { total: totalRepairs, breakdown: repairsByMethod, list: repairsList },
+        expenses: { total: totalExpenses, breakdown: expensesByMethod, list: expensesList },
         supplierPurchases: { total: totalSupplierPurchases },
-        supplierPayments: { total: totalSupplierPayments, breakdown: supplierPaymentsByMethod },
-        usedSpend: { total: totalUsedSpend, breakdown: usedSpendByMethod },
-        installments: { total: totalInstallments, breakdown: installmentsByMethod },
+        supplierPayments: { total: totalSupplierPayments, breakdown: supplierPaymentsByMethod, list: supplierPaymentsList },
+        usedSpend: { total: totalUsedSpend, breakdown: usedSpendByMethod, list: usedSpendList },
+        installments: { total: totalInstallments, breakdown: installmentsByMethod, list: installmentsList },
         till: { opening: openingBalance, closing: closingBalance, isTillOpen }
       } });
     }
