@@ -2578,13 +2578,11 @@
     }
 
     function paymentReceiptHTML(p, plan) {
-      const shop = window.SHOP || {};
-      const currency = shop.currency || '₹';
+      const c = shopCtx();
+      const currency = c.currency;
       return `
         <div style="font-family:monospace;font-size:12px;line-height:1.4;max-width:280px;margin:auto">
-          <div style="text-align:center;font-weight:bold;font-size:14px">${esc(shop.name || 'Mobile Shop')}</div>
-          <div style="text-align:center;font-size:10px">${esc(shop.address || '')}</div>
-          <div style="text-align:center;font-size:10px">Phone: ${esc(shop.phone || '')}</div>
+          ${printHeader(c, true)}
           <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
           <div style="text-align:center;font-weight:bold">PAYMENT RECEIPT</div>
           <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
@@ -2622,8 +2620,8 @@
     }
 
     function purchaseBillHTML(pur) {
-      const shop = window.SHOP || {};
-      const currency = pur.currency || shop.currency || '₹';
+      const c = shopCtx();
+      const currency = pur.currency || c.currency;
       const items = pur.items || [];
       const total = Number(pur.total_amount) || 0;
       const paid = Number(pur.amount_paid) || 0;
@@ -2646,8 +2644,7 @@
           <style>
             body { font-family: Arial, sans-serif; color: #333; margin: 40px; line-height: 1.5; }
             .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px; }
-            .shop-title { font-size: 24px; font-weight: bold; margin: 0; }
-            .bill-title { font-size: 28px; font-weight: bold; margin: 0; color: #1e3a8a; }
+            .bill-title { font-size: 24px; font-weight: bold; margin: 0; color: #1e3a8a; }
             .details { display: flex; justify-content: space-between; margin-bottom: 30px; }
             .details-block { width: 45%; }
             .details-block h3 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; color: #555; border-bottom: 1px solid #eee; padding-bottom: 5px; }
@@ -2660,14 +2657,13 @@
             .summary-table td { padding: 6px 12px; font-size: 14px; }
             .summary-table tr.total { font-weight: bold; font-size: 16px; background-color: #f3f4f6; }
             .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #777; border-top: 1px solid #eee; padding-top: 10px; }
+            .logo { max-height: 60px; margin-bottom: 6px; }
           </style>
         </head>
         <body>
           <div class="header">
             <div>
-              <p class="shop-title">${esc(shop.name || 'Mobile POS')}</p>
-              <p style="margin:4px 0;font-size:14px;color:#555">${esc(shop.address || '')}</p>
-              <p style="margin:4px 0;font-size:14px;color:#555">Phone: ${esc(shop.phone || '')}</p>
+              ${printHeader(c, false)}
             </div>
             <div style="text-align:right">
               <p class="bill-title">PURCHASE ORDER</p>
@@ -2722,7 +2718,7 @@
           </div>
           
           <div class="footer">
-            <p>Generated automatically by ${esc(shop.name || 'Mobile POS')}. This is a computer generated document.</p>
+            <p>Generated automatically by ${esc(c.name || 'Mobile POS')}. This is a computer generated document.</p>
           </div>
           
           <script>
@@ -2734,13 +2730,11 @@
     }
 
     function supplierPaymentReceiptHTML(p, purchase) {
-      const shop = window.SHOP || {};
-      const currency = shop.currency || '₹';
+      const c = shopCtx();
+      const currency = c.currency;
       return `
         <div style="font-family:monospace;font-size:12px;line-height:1.4;max-width:280px;margin:auto">
-          <div style="text-align:center;font-weight:bold;font-size:14px">${esc(shop.name || 'Mobile Shop')}</div>
-          <div style="text-align:center;font-size:10px">${esc(shop.address || '')}</div>
-          <div style="text-align:center;font-size:10px">Phone: ${esc(shop.phone || '')}</div>
+          ${printHeader(c, true)}
           <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
           <div style="text-align:center;font-weight:bold">SUPPLIER PAYMENT RECEIPT</div>
           <div style="border-bottom:1px dashed #000;margin:8px 0"></div>
@@ -6530,9 +6524,7 @@
           <body>
             <div class="header">
               <div>
-                <p class="shop-title">${esc(shop.name || 'Mobile POS')}</p>
-                <p style="margin:4px 0;font-size:12px;color:#555">${esc(shop.address || '')}</p>
-                <p style="margin:4px 0;font-size:12px;color:#555">Phone: ${esc(shop.phone || '')}</p>
+                ${printHeader(shopCtx(), false)}
               </div>
               <div style="text-align:right">
                 <p class="bill-title">DAILY ROJNAMCHA (ACCOUNTS STATEMENT)</p>
