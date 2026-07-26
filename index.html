@@ -2350,6 +2350,68 @@
       return S.currency_position === 'after' ? (v + ' ' + sym) : (sym + v);
     }
     window.money = money;
+
+    const viewAndPrintProof = (url, title = 'Document Proof') => {
+      if (!url) return;
+      const isPdf = url.startsWith('data:application/pdf') || url.toLowerCase().includes('.pdf');
+      
+      const printFile = () => {
+        const pwin = window.open();
+        if (isPdf) {
+          pwin.document.write(`
+            <html>
+            <body style="margin:0;">
+              <embed width="100%" height="100%" src="${url}" type="application/pdf" />
+              <script>
+                setTimeout(() => { window.print(); }, 1000);
+              <\/script>
+            </body>
+            </html>
+          `);
+        } else {
+          pwin.document.write(`
+            <html>
+            <body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;">
+              <img src="${url}" style="max-width:100%;max-height:100%;object-fit:contain;" />
+              <script>
+                window.onload = () => { window.print(); setTimeout(() => { window.close(); }, 500); };
+              <\/script>
+            </body>
+            </html>
+          `);
+        }
+      };
+
+      window.printCurrentProof = printFile;
+
+      Swal.fire({
+        title: title,
+        html: isPdf ? `
+          <div style="width:100%;height:450px;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.1)">
+            <object data="${url}" type="application/pdf" style="width:100%;height:100%;">
+              <iframe src="${url}" style="width:100%;height:100%;border:none;"></iframe>
+            </object>
+          </div>
+          <div style="margin-top:12px;display:flex;justify-content:center;gap:10px;">
+            <button class="btn btn-secondary" onclick="window.open('${url}', '_blank')"><i class="fas fa-external-link-alt"></i> Open in New Tab</button>
+            <button class="btn btn-primary" onclick="window.printCurrentProof()"><i class="fas fa-print"></i> Print PDF</button>
+          </div>
+        ` : `
+          <div style="text-align:center;padding:10px;">
+            <img src="${url}" style="max-width:100%;max-height:380px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.1);"/>
+          </div>
+          <div style="margin-top:12px;display:flex;justify-content:center;gap:10px;">
+            <button class="btn btn-primary" onclick="window.printCurrentProof()"><i class="fas fa-print"></i> Print Image</button>
+          </div>
+        `,
+        showConfirmButton: true,
+        confirmButtonText: 'Close',
+        confirmButtonColor: 'var(--navy-primary)',
+        width: isPdf ? '600px' : '480px'
+      });
+    };
+    window.viewAndPrintProof = viewAndPrintProof;
+
     function fmtDate(d){ if(!d) return '—'; try { return new Date(d).toLocaleString('en-GB',{ year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }); } catch(e){ return d; } }
     function fmtDay(d){ if(!d) return '—'; try { return new Date(d).toLocaleDateString('en-GB',{ year:'numeric', month:'short', day:'2-digit' }); } catch(e){ return d; } }
 
@@ -3751,13 +3813,7 @@
 
       const onPurAction = (action, row) => {
         if (action === 'bill_proof' && row.bill_proof_url) {
-          Swal.fire({
-            title: 'Bill Proof Invoice #' + row.invoice_no,
-            imageUrl: row.bill_proof_url,
-            imageAlt: 'Bill proof',
-            confirmButtonText: 'Close',
-            confirmButtonColor: 'var(--navy-primary)'
-          });
+          viewAndPrintProof(row.bill_proof_url, 'Bill Proof Invoice #' + row.invoice_no);
         } else if (action === 'print_a4') {
           printDoc(purchaseBillHTML(row), 'Purchase Order ' + row.invoice_no, 'a4');
         } else if (action === 'pay') {
@@ -3890,6 +3946,7 @@
           {editPurEntry && (
             <EditSupplierPurchaseModal
               purchase={editPurEntry}
+              products={allProducts}
               onClose={() => setEditPurEntry(null)}
               onSave={(data) => {
                 setBusy('Updating…');
@@ -4055,20 +4112,27 @@
         setCartItems(prev => prev.filter((_, i) => i !== idx));
       };
 
-      // Sum totals
       const totalAmount = cartItems.reduce((sum, item) => sum + (item.cost_price * item.qty), 0);
-
       const methodOpts = [{ value:'cash', label:'Cash' }, { value:'card', label:'Card' }, { value:'bank_transfer', label:'Bank Transfer' }, { value:'gpay', label:'GPay' }, { value:'phonepe', label:'PhonePe' }, { value:'other', label:'Other Online' }];
 
       const handleProofUpload = async (e) => {
         const file = e.target.files[0]; if (!file) return;
         setUploading(true);
         try {
-          const compressed = await compressImage(file, 450, 450, 0.7);
-          setProof(compressed);
+          if (file.type === 'application/pdf') {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (ev) => {
+              setProof(ev.target.result);
+              setUploading(false);
+            };
+          } else {
+            const compressed = await compressImage(file, 450, 450, 0.7);
+            setProof(compressed);
+            setUploading(false);
+          }
         } catch (err) {
           console.error("Proof compression failed:", err);
-        } finally {
           setUploading(false);
         }
       };
@@ -4080,7 +4144,6 @@
         const p = parseFloat(paid) || 0;
         if (p > totalAmount) { Swal.fire({ icon:'warning', title:'Paid amount cannot exceed total bill amount' }); return; }
 
-        // Create summary string
         const summary = cartItems.map(item => `${item.product_name} (x${item.qty})`).join(', ');
 
         onSave({
@@ -4091,7 +4154,7 @@
           items: cartItems,
           total_amount: totalAmount,
           amount_paid: p,
-          method,
+          method: p > 0 ? method : 'cash',
           bill_proof_url: proof
         });
       };
@@ -4111,8 +4174,8 @@
                 <div style={{border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', padding:'12px', background:'rgba(255,255,255,0.02)', margin:'14px 0'}}>
                   <h4 style={{margin:'0 0 10px', color:'var(--navy-accent)', fontSize:'14px'}}><i className="fas fa-plus-circle"></i> Add Product Line Items</h4>
                   
-                  <div className="form-group">
-                    <label><i className="fas fa-box"></i> Product *</label>
+                  <div className="form-group" style={{marginBottom:'8px'}}>
+                    <label>Product *</label>
                     <SearchableDropdown options={productOpts} value={selectedProductId} onChange={setSelectedProductId} placeholder="Search product name..." />
                     <small style={{color:'#778', display:'block', marginTop:'2px'}}>If product isn't listed, first create it with 0 stock in the <b>Products</b> page.</small>
                   </div>
@@ -4120,33 +4183,37 @@
                   <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr auto', gap:'12px', alignItems:'flex-end', marginTop:'8px'}}>
                     <div className="form-group" style={{margin:0}}><label><i className="fas fa-sack-dollar"></i> PO Rate (Cost Price) *</label><input type="number" step="0.01" min="0" value={poRate} onChange={(e) => setPoRate(e.target.value)} placeholder="Rate" /></div>
                     <div className="form-group" style={{margin:0}}><label><i className="fas fa-hashtag"></i> Qty *</label><input type="number" min="1" value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} placeholder="Qty" /></div>
-                    <button type="button" className="btn btn-primary" onClick={addItemToCart} style={{padding:'10px 16px', display:'flex', gap:'5px', alignItems:'center'}}><i className="fas fa-plus"></i> Add Item</button>
+                    <button type="button" className="btn btn-secondary" onClick={addItemToCart} style={{padding:'8px 16px'}}><i className="fas fa-plus"></i> Add Item</button>
                   </div>
+
+                  {cartItems.length > 0 && (
+                    <div className="about-table-wrapper" style={{marginTop:'12px', maxHeight:'180px', overflowY:'auto'}}>
+                      <table className="about-roles-table" style={{fontSize:'12px'}}>
+                        <thead>
+                          <tr><th>Product</th><th>Rate</th><th>Qty</th><th>Total</th><th style={{width:'40px'}}></th></tr>
+                        </thead>
+                        <tbody>
+                          {cartItems.map((item, idx) => (
+                            <tr key={idx}>
+                              <td>{esc(item.product_name)}</td>
+                              <td>{money(item.cost_price)}</td>
+                              <td>{item.qty}</td>
+                              <td>{money(item.cost_price * item.qty)}</td>
+                              <td style={{textAlign:'center'}}><button type="button" className="action-icon" style={{color:'#b91c1c'}} onClick={() => removeItem(idx)}><i className="fas fa-trash"></i></button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
 
-                <div className="about-table-wrapper" style={{maxHeight:'200px', overflowY:'auto', marginBottom:'14px'}}>
-                  <table className="about-roles-table" style={{width:'100%'}}>
-                    <thead>
-                      <tr><th>Product</th><th>Rate</th><th>Qty</th><th>Total</th><th>Action</th></tr>
-                    </thead>
-                    <tbody>
-                      {cartItems.length === 0 && <tr><td colSpan="5" style={{textAlign:'center', color:'#778'}}>No items added yet.</td></tr>}
-                      {cartItems.map((item, idx) => (
-                        <tr key={idx}>
-                          <td style={{fontWeight:600}}>{esc(item.product_name)}</td>
-                          <td>{money(item.cost_price)}</td>
-                          <td>{item.qty}</td>
-                          <td style={{fontWeight:'700'}}>{money(item.cost_price * item.qty)}</td>
-                          <td><button type="button" className="action-icon" style={{color:'#b91c1c'}} onClick={() => removeItem(idx)}><i className="fas fa-trash"></i></button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="ins-summary" style={{gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px'}}>
-                  <div className="ins-card"><span>Total Bill Amount</span><b style={{fontSize:'18px'}}>{money(totalAmount)}</b></div>
-                  <div className="ins-card">
+                <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                  <div className="form-group" style={{margin:0, padding:'6px', background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'6px', display:'flex', flexDirection:'column', justifyContent:'center'}}>
+                    <span style={{fontSize:'12px', color:'rgba(255,255,255,0.5)', display:'block'}}>Total Bill Amount</span>
+                    <span style={{fontSize:'18px', fontWeight:'800', color:'var(--navy-accent)', display:'block', marginTop:'4px'}}>{money(totalAmount)}</span>
+                  </div>
+                  <div className="form-group" style={{margin:0}}>
                     <span>Amount Paid Initially</span>
                     <input type="number" step="0.01" min="0" max={totalAmount} value={paid} onChange={(e) => setPaid(e.target.value)} placeholder="0.00" style={{marginTop:'4px', width:'100%', padding:'6px 10px', background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.1)', color:'#fff', borderRadius:'4px', fontWeight:'700'}} />
                   </div>
@@ -4157,12 +4224,19 @@
                 )}
 
                 <div className="form-group" style={{marginTop:'12px'}}>
-                  <label><i className="fas fa-camera"></i> Upload Bill / Invoice Proof (Screenshot/Receipt)</label>
-                  <input type="file" className="file-input" accept="image/*" onChange={handleProofUpload} />
-                  {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Compressing bill...</small>}
+                  <label><i className="fas fa-camera"></i> Upload Bill / Invoice Proof (Screenshot/Receipt/PDF)</label>
+                  <input type="file" className="file-input" accept="image/*,application/pdf" onChange={handleProofUpload} />
+                  {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Processing file...</small>}
                   {proof && (
                     <div style={{marginTop:'8px', textAlign:'center'}}>
-                      <img src={proof} alt="Bill proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                      {proof.startsWith('data:application/pdf') || proof.toLowerCase().includes('.pdf') ? (
+                        <div style={{padding:'10px', background:'rgba(255,255,255,0.05)', borderRadius:'6px', display:'inline-block'}}>
+                          <i className="fas fa-file-pdf" style={{fontSize:'32px', color:'#ff3860', display:'block', marginBottom:'4px'}}></i>
+                          <span style={{fontSize:'12px', color:'#fff'}}>PDF Document Loaded</span>
+                        </div>
+                      ) : (
+                        <img src={proof} alt="Bill proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                      )}
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProof('')} style={{display:'block', margin:'4px auto 0', padding:'2px 8px', fontSize:'11px'}}><i className="fas fa-trash"></i> Remove Bill</button>
                     </div>
                   )}
@@ -4176,31 +4250,190 @@
       );
     }
 
-    function EditSupplierPurchaseModal({ purchase, onClose, onSave }) {
+    function EditSupplierPurchaseModal({ purchase, products, onClose, onSave }) {
       const [invoiceNo, setInvoiceNo] = useState(purchase.invoice_no || '');
       const [billDate, setBillDate] = useState(purchase.bill_date || todayStr());
       const [notes, setNotes] = useState(purchase.notes || '');
+      const [cartItems, setCartItems] = useState(purchase.items || []);
+      const [selectedProductId, setSelectedProductId] = useState('');
+      const [poRate, setPoRate] = useState('');
+      const [purchaseQty, setPurchaseQty] = useState('');
+      const [proof, setProof] = useState(purchase.bill_proof_url || '');
+      const [uploading, setUploading] = useState(false);
+
+      const productOpts = (products || []).map(p => ({ value: p.id, label: p.name + ` (Current Cost: ${money(p.cost_price)})` }));
+      const curProduct = (products || []).find(p => String(p.id) === String(selectedProductId));
+
+      useEffect(() => {
+        if (curProduct) {
+          setPoRate(String(curProduct.cost_price || ''));
+        } else {
+          setPoRate('');
+        }
+      }, [selectedProductId]);
+
+      const addItemToCart = () => {
+        if (!selectedProductId) { Swal.fire({ icon:'warning', title:'Select a product first' }); return; }
+        const rate = parseFloat(poRate) || 0;
+        const qty = parseInt(purchaseQty) || 0;
+        if (rate <= 0) { Swal.fire({ icon:'warning', title:'Enter a valid PO Rate' }); return; }
+        if (qty <= 0) { Swal.fire({ icon:'warning', title:'Enter a valid Quantity' }); return; }
+
+        setCartItems(prev => {
+          const exIdx = prev.findIndex(item => String(item.product_id) === String(selectedProductId));
+          if (exIdx > -1) {
+            Swal.fire({
+              title: 'Product already in bill',
+              text: 'Do you want to update its Qty and Rate?',
+              showCancelButton: true,
+              confirmButtonText: 'Update Item'
+            }).then(res => {
+              if (res.isConfirmed) {
+                setCartItems(prev2 => prev2.map((item, idx) => idx === exIdx ? { ...item, qty, cost_price: rate } : item));
+              }
+            });
+            return prev;
+          }
+          return [...prev, {
+            product_id: Number(selectedProductId),
+            product_name: curProduct.name,
+            qty,
+            cost_price: rate
+          }];
+        });
+
+        setSelectedProductId('');
+        setPoRate('');
+        setPurchaseQty('');
+      };
+
+      const removeItem = (idx) => {
+        setCartItems(prev => prev.filter((_, i) => i !== idx));
+      };
+
+      const totalAmount = cartItems.reduce((sum, item) => sum + (item.cost_price * item.qty), 0);
+
+      const handleProofUpload = async (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        setUploading(true);
+        try {
+          if (file.type === 'application/pdf') {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (ev) => {
+              setProof(ev.target.result);
+              setUploading(false);
+            };
+          } else {
+            const compressed = await compressImage(file, 450, 450, 0.7);
+            setProof(compressed);
+            setUploading(false);
+          }
+        } catch (err) {
+          console.error("Proof compression failed:", err);
+          setUploading(false);
+        }
+      };
 
       const submit = (e) => {
         e.preventDefault();
-        onSave({ invoice_no: invoiceNo.trim(), bill_date: billDate, notes: notes.trim() });
+        if (!invoiceNo.trim()) { Swal.fire({ icon:'warning', title:'Enter Invoice No' }); return; }
+        if (!cartItems.length) { Swal.fire({ icon:'warning', title:'Add at least one product to the purchase bill' }); return; }
+
+        onSave({
+          invoice_no: invoiceNo.trim(),
+          bill_date: billDate,
+          notes: notes.trim(),
+          items: cartItems,
+          bill_proof_url: proof
+        });
       };
 
       return (
         <div className="modal-overlay" onClick={onClose}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'460px'}}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'640px'}}>
             <div className="modal-header"><h3><i className="fas fa-edit"></i> Edit Purchase Entry</h3><button className="close-btn" onClick={onClose}><i className="fas fa-times"></i></button></div>
             <div className="modal-body">
               <div className="ins-plan-head" style={{marginBottom:'12px'}}>
                 <div><span className="ins-k">Supplier</span><span className="ins-v">{esc(purchase.supplier_name)}</span></div>
-                <div><span className="ins-k">Total Bill</span><span className="ins-v">{money(purchase.total_amount)}</span></div>
+                <div><span className="ins-k">Already Paid (Total)</span><span className="ins-v" style={{color:'#2e7d32'}}>{money(purchase.amount_paid)}</span></div>
               </div>
-              <p style={{color:'rgba(255,255,255,0.5)', fontSize:'13px', marginBottom:'12px'}}><i className="fas fa-circle-info"></i> You can edit invoice details and date. To change items or amounts, delete and re-enter the purchase.</p>
+              
               <form onSubmit={submit}>
-                <div className="form-group"><label><i className="fas fa-file-invoice"></i> Invoice No</label><input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="Invoice number" /></div>
-                <div className="form-group"><label><i className="fas fa-calendar"></i> Bill Date</label><input type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} /></div>
-                <div className="form-group"><label><i className="fas fa-sticky-note"></i> Notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Additional notes…" style={{width:'100%', padding:'8px', borderRadius:'6px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', color:'#fff', resize:'vertical'}} /></div>
-                <div className="form-actions"><button type="submit" className="btn btn-primary"><i className="fas fa-save"></i> Save Changes</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
+                <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                  <div className="form-group"><label><i className="fas fa-file-invoice"></i> Invoice No</label><input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="Invoice number" /></div>
+                  <div className="form-group"><label><i className="fas fa-calendar"></i> Bill Date</label><input type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} /></div>
+                </div>
+
+                <div style={{border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', padding:'12px', background:'rgba(255,255,255,0.02)', margin:'14px 0'}}>
+                  <h4 style={{margin:'0 0 10px', color:'var(--navy-accent)', fontSize:'14px'}}><i className="fas fa-plus-circle"></i> Add / Edit Product Line Items</h4>
+                  
+                  <div className="form-group" style={{marginBottom:'8px'}}>
+                    <label>Product *</label>
+                    <SearchableDropdown options={productOpts} value={selectedProductId} onChange={setSelectedProductId} placeholder="Search product name..." />
+                  </div>
+
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr auto', gap:'12px', alignItems:'flex-end', marginTop:'8px'}}>
+                    <div className="form-group" style={{margin:0}}><label><i className="fas fa-sack-dollar"></i> PO Rate (Cost Price) *</label><input type="number" step="0.01" min="0" value={poRate} onChange={(e) => setPoRate(e.target.value)} placeholder="Rate" /></div>
+                    <div className="form-group" style={{margin:0}}><label><i className="fas fa-hashtag"></i> Qty *</label><input type="number" min="1" value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} placeholder="Qty" /></div>
+                    <button type="button" className="btn btn-secondary" onClick={addItemToCart} style={{padding:'8px 16px'}}><i className="fas fa-plus"></i> Add/Update</button>
+                  </div>
+
+                  {cartItems.length > 0 && (
+                    <div className="about-table-wrapper" style={{marginTop:'12px', maxHeight:'180px', overflowY:'auto'}}>
+                      <table className="about-roles-table" style={{fontSize:'12px'}}>
+                        <thead>
+                          <tr><th>Product</th><th>Rate</th><th>Qty</th><th>Total</th><th style={{width:'40px'}}></th></tr>
+                        </thead>
+                        <tbody>
+                          {cartItems.map((item, idx) => (
+                            <tr key={idx}>
+                              <td>{esc(item.product_name)}</td>
+                              <td>{money(item.cost_price)}</td>
+                              <td>{item.qty}</td>
+                              <td>{money(item.cost_price * item.qty)}</td>
+                              <td style={{textAlign:'center'}}><button type="button" className="action-icon" style={{color:'#b91c1c'}} onClick={() => removeItem(idx)}><i className="fas fa-trash"></i></button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                  <div className="form-group" style={{margin:0, padding:'6px', background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'6px', display:'flex', flexDirection:'column', justifyContent:'center'}}>
+                    <span style={{fontSize:'12px', color:'rgba(255,255,255,0.5)', display:'block'}}>Recalculated Bill Total</span>
+                    <span style={{fontSize:'18px', fontWeight:'800', color:'var(--navy-accent)', display:'block', marginTop:'4px'}}>{money(totalAmount)}</span>
+                  </div>
+                  <div className="form-group" style={{margin:0, padding:'6px', background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'6px', display:'flex', flexDirection:'column', justifyContent:'center'}}>
+                    <span style={{fontSize:'12px', color:'rgba(255,255,255,0.5)', display:'block'}}>New Remaining Dues</span>
+                    <span style={{fontSize:'18px', fontWeight:'800', color: (totalAmount - purchase.amount_paid) > 0 ? '#c5221f' : '#2e7d32', display:'block', marginTop:'4px'}}>{money(Math.max(0, totalAmount - purchase.amount_paid))}</span>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{marginTop:'12px'}}><label><i className="fas fa-sticky-note"></i> Notes</label><textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Additional notes…" style={{width:'100%', padding:'8px', borderRadius:'6px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', color:'#fff', resize:'vertical'}} /></div>
+
+                <div className="form-group" style={{marginTop:'12px'}}>
+                  <label><i className="fas fa-camera"></i> Upload Bill / Invoice Proof (Screenshot/Receipt/PDF)</label>
+                  <input type="file" className="file-input" accept="image/*,application/pdf" onChange={handleProofUpload} />
+                  {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Processing file...</small>}
+                  {proof && (
+                    <div style={{marginTop:'8px', textAlign:'center'}}>
+                      {proof.startsWith('data:application/pdf') || proof.toLowerCase().includes('.pdf') ? (
+                        <div style={{padding:'10px', background:'rgba(255,255,255,0.05)', borderRadius:'6px', display:'inline-block'}}>
+                          <i className="fas fa-file-pdf" style={{fontSize:'32px', color:'#ff3860', display:'block', marginBottom:'4px'}}></i>
+                          <span style={{fontSize:'12px', color:'#fff'}}>PDF Document Loaded</span>
+                        </div>
+                      ) : (
+                        <img src={proof} alt="Bill proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                      )}
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProof('')} style={{display:'block', margin:'4px auto 0', padding:'2px 8px', fontSize:'11px'}}><i className="fas fa-trash"></i> Remove Bill</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="form-actions"><button type="submit" className="btn btn-primary" disabled={uploading || !cartItems.length}><i className="fas fa-save"></i> Save Changes</button><button type="button" className="btn btn-secondary" onClick={onClose}><i className="fas fa-times"></i> Cancel</button></div>
               </form>
             </div>
           </div>
@@ -4220,11 +4453,20 @@
         const file = e.target.files[0]; if (!file) return;
         setUploading(true);
         try {
-          const compressed = await compressImage(file, 450, 450, 0.7);
-          setProof(compressed);
+          if (file.type === 'application/pdf') {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (ev) => {
+              setProof(ev.target.result);
+              setUploading(false);
+            };
+          } else {
+            const compressed = await compressImage(file, 450, 450, 0.7);
+            setProof(compressed);
+            setUploading(false);
+          }
         } catch (err) {
           console.error("Proof compression failed:", err);
-        } finally {
           setUploading(false);
         }
       };
@@ -4245,12 +4487,19 @@
               <div className="form-group"><label><i className="fas fa-wallet"></i> Method / Source</label><SearchableDropdown options={methodOpts} value={method} onChange={setMethod} placeholder="Method" /></div>
               
               <div className="form-group" style={{marginTop:'12px'}}>
-                <label><i className="fas fa-camera"></i> Upload Proof of Payment (Screenshot/Receipt)</label>
-                <input type="file" className="file-input" accept="image/*" onChange={handleProofUpload} />
-                {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Compressing proof...</small>}
+                <label><i className="fas fa-camera"></i> Upload Proof of Payment (Screenshot/Receipt/PDF)</label>
+                <input type="file" className="file-input" accept="image/*,application/pdf" onChange={handleProofUpload} />
+                {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Processing file...</small>}
                 {proof && (
                   <div style={{marginTop:'8px', textAlign:'center'}}>
-                    <img src={proof} alt="Proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                    {proof.startsWith('data:application/pdf') || proof.toLowerCase().includes('.pdf') ? (
+                      <div style={{padding:'10px', background:'rgba(255,255,255,0.05)', borderRadius:'6px', display:'inline-block'}}>
+                        <i className="fas fa-file-pdf" style={{fontSize:'32px', color:'#ff3860', display:'block', marginBottom:'4px'}}></i>
+                        <span style={{fontSize:'12px', color:'#fff'}}>PDF Document Loaded</span>
+                      </div>
+                    ) : (
+                      <img src={proof} alt="Proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                    )}
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProof('')} style={{display:'block', margin:'4px auto 0', padding:'2px 8px', fontSize:'11px'}}><i className="fas fa-trash"></i> Remove Proof</button>
                   </div>
                 )}
@@ -4295,13 +4544,7 @@
                         <td>
                           {p.proof_url ? (
                             <button className="btn btn-secondary btn-sm" style={{padding:'2px 8px', fontSize:'11px'}} onClick={() => {
-                              Swal.fire({
-                                title: 'Payment Proof',
-                                imageUrl: p.proof_url,
-                                imageAlt: 'Proof of payment',
-                                confirmButtonText: 'Close',
-                                confirmButtonColor: 'var(--navy-primary)'
-                              });
+                              viewAndPrintProof(p.proof_url, 'Payment Proof ID #' + p.id);
                             }}><i className="fas fa-image"></i> View Proof</button>
                           ) : <span style={{color:'#778'}}>—</span>}
                         </td>
@@ -5828,11 +6071,20 @@
         const file = e.target.files[0]; if (!file) return;
         setUploading(true);
         try {
-          const compressed = await compressImage(file, 450, 450, 0.7);
-          setProof(compressed);
+          if (file.type === 'application/pdf') {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (ev) => {
+              setProof(ev.target.result);
+              setUploading(false);
+            };
+          } else {
+            const compressed = await compressImage(file, 450, 450, 0.7);
+            setProof(compressed);
+            setUploading(false);
+          }
         } catch (err) {
           console.error("Proof compression failed:", err);
-        } finally {
           setUploading(false);
         }
       };
@@ -5864,12 +6116,19 @@
                     <div className="form-group"><label><i className="fas fa-truck-field"></i> Supplier</label><SearchableDropdown options={supplierOpts} value={supplierId} onChange={setSupplierId} placeholder="Select Supplier" /></div>
                     <div className="form-group"><label><i className="fas fa-file-invoice"></i> Supplier Bill / Invoice No.</label><input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="Invoice #" /></div>
                     <div className="form-group">
-                      <label><i className="fas fa-camera"></i> Upload Bill / Invoice Proof</label>
-                      <input type="file" className="file-input" accept="image/*" onChange={handleProofUpload} />
-                      {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Compressing bill...</small>}
+                      <label><i className="fas fa-camera"></i> Upload Bill / Invoice Proof (PDF/Image)</label>
+                      <input type="file" className="file-input" accept="image/*,application/pdf" onChange={handleProofUpload} />
+                      {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Processing file...</small>}
                       {proof && (
                         <div style={{marginTop:'8px', textAlign:'center'}}>
-                          <img src={proof} alt="Bill proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                          {proof.startsWith('data:application/pdf') || proof.toLowerCase().includes('.pdf') ? (
+                            <div style={{padding:'10px', background:'rgba(255,255,255,0.05)', borderRadius:'6px', display:'inline-block'}}>
+                              <i className="fas fa-file-pdf" style={{fontSize:'32px', color:'#ff3860', display:'block', marginBottom:'4px'}}></i>
+                              <span style={{fontSize:'12px', color:'#fff'}}>PDF Document Loaded</span>
+                            </div>
+                          ) : (
+                            <img src={proof} alt="Bill proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                          )}
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProof('')} style={{display:'block', margin:'4px auto 0', padding:'2px 8px', fontSize:'11px'}}><i className="fas fa-trash"></i> Remove Bill</button>
                         </div>
                       )}
@@ -7326,11 +7585,20 @@
         const file = e.target.files[0]; if (!file) return;
         setUploading(true);
         try {
-          const compressed = await compressImage(file, 450, 450, 0.7);
-          setProof(compressed);
+          if (file.type === 'application/pdf') {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (ev) => {
+              setProof(ev.target.result);
+              setUploading(false);
+            };
+          } else {
+            const compressed = await compressImage(file, 450, 450, 0.7);
+            setProof(compressed);
+            setUploading(false);
+          }
         } catch (err) {
           console.error("Proof compression failed:", err);
-        } finally {
           setUploading(false);
         }
       };
@@ -7350,12 +7618,19 @@
               <div className="form-group"><label><i className="fas fa-wallet"></i> Method / Source</label><SearchableDropdown options={methodOpts} value={method} onChange={setMethod} placeholder="Method" /></div>
               
               <div className="form-group" style={{marginTop:'12px'}}>
-                <label><i className="fas fa-camera"></i> Upload Proof of Payment (Screenshot/Receipt)</label>
-                <input type="file" className="file-input" accept="image/*" onChange={handleProofUpload} />
-                {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Compressing image...</small>}
+                <label><i className="fas fa-camera"></i> Upload Proof of Payment (Screenshot/Receipt/PDF)</label>
+                <input type="file" className="file-input" accept="image/*,application/pdf" onChange={handleProofUpload} />
+                {uploading && <small style={{color:'var(--navy-accent)', display:'block'}}>Processing file...</small>}
                 {proof && (
                   <div style={{marginTop:'8px', textAlign:'center'}}>
-                    <img src={proof} alt="Proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                    {proof.startsWith('data:application/pdf') || proof.toLowerCase().includes('.pdf') ? (
+                      <div style={{padding:'10px', background:'rgba(255,255,255,0.05)', borderRadius:'6px', display:'inline-block'}}>
+                        <i className="fas fa-file-pdf" style={{fontSize:'32px', color:'#ff3860', display:'block', marginBottom:'4px'}}></i>
+                        <span style={{fontSize:'12px', color:'#fff'}}>PDF Document Loaded</span>
+                      </div>
+                    ) : (
+                      <img src={proof} alt="Proof preview" style={{maxWidth:'100%', maxHeight:'120px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.1)'}} />
+                    )}
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProof('')} style={{display:'block', margin:'4px auto 0', padding:'2px 8px', fontSize:'11px'}}><i className="fas fa-trash"></i> Remove Proof</button>
                   </div>
                 )}
@@ -7435,13 +7710,7 @@
                         <td>
                           {p.proof_url ? (
                             <button className="btn btn-secondary btn-sm" style={{padding:'2px 8px', fontSize:'11px'}} onClick={() => {
-                              Swal.fire({
-                                title: 'Payment Proof',
-                                imageUrl: p.proof_url,
-                                imageAlt: 'Proof of payment',
-                                confirmButtonText: 'Close',
-                                confirmButtonColor: 'var(--navy-primary)'
-                              });
+                              viewAndPrintProof(p.proof_url, 'Payment Proof ID #' + p.id);
                             }}><i className="fas fa-image"></i> View Proof</button>
                           ) : <span style={{color:'#778'}}>—</span>}
                         </td>

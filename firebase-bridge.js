@@ -1254,15 +1254,142 @@
       const purchaseRef = db.collection('supplier_purchases').doc(String(purchaseId));
       const purchaseDoc = await purchaseRef.get();
       if (!purchaseDoc.exists || purchaseDoc.data().deleted) return err('Purchase not found');
+      const oldPurchase = purchaseDoc.data();
+
+      // 1. Get all payments recorded for this purchase to compute actual amount paid
+      const paymentsSnap = await db.collection('supplier_payments')
+        .where('purchase_id', '==', Number(purchaseId))
+        .get();
+      let totalPaidAmount = 0;
+      paymentsSnap.forEach(d => {
+        const p = d.data();
+        if (!p.deleted) {
+          totalPaidAmount = round2(totalPaidAmount + Number(p.amount || 0));
+        }
+      });
+
+      // 2. Find old inventory movements to delete/replace
+      const oldInvoiceNo = oldPurchase.invoice_no;
+      const movementsSnap = await db.collection('inventory_movements')
+        .where('invoice_no', '==', oldInvoiceNo)
+        .where('movement_type', '==', 'purchase')
+        .get();
+      const oldMovementRefs = [];
+      movementsSnap.forEach(d => {
+        if (!d.data().deleted) oldMovementRefs.push(d.ref);
+      });
+
+      // 3. Prepare new items and generate movement IDs
+      const newItems = data.items || oldPurchase.items || [];
+      const movementIds = [];
+      for (let i = 0; i < newItems.length; i++) {
+        movementIds.push(await getNextId('inventory_movements'));
+      }
+
+      // Gather all product IDs to load in the transaction (Reads must be first)
+      const oldItems = oldPurchase.items || [];
+      const uniqueProductIds = Array.from(new Set([
+        ...oldItems.map(it => String(it.product_id)),
+        ...newItems.map(it => String(it.product_id))
+      ])).filter(id => id && id !== 'undefined');
 
       const nowIso = new Date().toISOString();
-      const allowedFields = ['invoice_no', 'bill_date', 'notes', 'supplier_name'];
-      const updates = { updated: nowIso };
-      allowedFields.forEach(f => { if (data[f] !== undefined) updates[f] = data[f]; });
 
-      await purchaseRef.update(updates);
-      await logActivity(uid, 'update', 'supplier_purchases', purchaseId, `Updated purchase #${updates.invoice_no || purchaseDoc.data().invoice_no}`);
-      return ok('Purchase updated');
+      return db.runTransaction(async (transaction) => {
+        // Load all products first
+        const productDocs = {};
+        for (const pid of uniqueProductIds) {
+          const pref = db.collection('products').doc(pid);
+          const pdoc = await transaction.get(pref);
+          if (pdoc.exists) {
+            productDocs[pid] = { doc: pdoc, ref: pref };
+          }
+        }
+
+        // --- WRITES START HERE ---
+        
+        // A. Delete old inventory movements
+        oldMovementRefs.forEach(ref => {
+          transaction.delete(ref);
+        });
+
+        // B. Revert old stock values and apply new ones
+        const stockChanges = {};
+        oldItems.forEach(it => {
+          if (it.product_id) {
+            stockChanges[it.product_id] = (stockChanges[it.product_id] || 0) - Number(it.qty || 0);
+          }
+        });
+        newItems.forEach(it => {
+          if (it.product_id) {
+            stockChanges[it.product_id] = (stockChanges[it.product_id] || 0) + Number(it.qty || 0);
+          }
+        });
+
+        // Apply changes to product docs
+        Object.keys(stockChanges).forEach(pid => {
+          const pInfo = productDocs[pid];
+          if (pInfo) {
+            const currentStock = Number(pInfo.doc.data().stock_qty || 0);
+            const change = stockChanges[pid];
+            const newStock = Math.max(0, currentStock + change);
+            
+            const updateFields = {
+              stock_qty: newStock,
+              updated: nowIso
+            };
+            
+            const newItem = newItems.find(it => String(it.product_id) === String(pid));
+            if (newItem) {
+              updateFields.cost_price = round2(newItem.cost_price);
+            }
+            
+            transaction.update(pInfo.ref, updateFields);
+          }
+        });
+
+        // C. Write new inventory movements
+        newItems.forEach((item, idx) => {
+          const movementId = movementIds[idx];
+          const movementRef = db.collection('inventory_movements').doc(String(movementId));
+          transaction.set(movementRef, {
+            id: movementId,
+            product_id: Number(item.product_id),
+            user_id: uid,
+            movement_type: 'purchase',
+            qty_change: Number(item.qty),
+            note: `Purchased on Supplier Invoice #${data.invoice_no || oldPurchase.invoice_no}`,
+            supplier_id: Number(oldPurchase.supplier_id),
+            invoice_no: data.invoice_no || oldPurchase.invoice_no,
+            created: nowIso,
+            updated: nowIso
+          });
+        });
+
+        // D. Calculate total, due and payment status
+        const total = newItems.reduce((sum, item) => sum + (Number(item.cost_price) * Number(item.qty)), 0);
+        const due = round2(Math.max(0, total - totalPaidAmount));
+        const paymentStatus = due <= 0 ? 'paid' : (totalPaidAmount <= 0 ? 'unpaid' : 'partial');
+
+        const updates = {
+          invoice_no: data.invoice_no !== undefined ? data.invoice_no : oldPurchase.invoice_no,
+          bill_date: data.bill_date !== undefined ? data.bill_date : oldPurchase.bill_date,
+          notes: data.notes !== undefined ? data.notes : oldPurchase.notes,
+          bill_proof_url: data.bill_proof_url !== undefined ? data.bill_proof_url : oldPurchase.bill_proof_url,
+          items: newItems,
+          items_summary: newItems.map(item => `${item.product_name} (x${item.qty})`).join(', '),
+          total_amount: total,
+          due_amount: due,
+          payment_status: paymentStatus,
+          updated: nowIso
+        };
+
+        transaction.update(purchaseRef, updates);
+      }).then(() => {
+        return ok('Purchase updated successfully');
+      }).catch(err => {
+        return { success: false, message: err.message };
+      });
     },
 
     getSupplierPayments: async (purchaseId, token) => {
